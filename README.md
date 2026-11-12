@@ -5,21 +5,18 @@ This monorepo houses the **Single Shared Backend**, **Admin Website**, and **Adm
 ## Folder Structure
 
 ```text
+├── Admin/                       # React + TypeScript + Tailwind + Recharts Admin Console
+├── Admin_Mobile/                # React Native CLI + TypeScript Admin Mobile App
 ├── backend/                     # Single shared Node.js + Express + MongoDB backend
 │   ├── src/
 │   ├── .env.example
 │   └── package.json
-├── DocScan_admin/
-│   ├── Admin_Website/           # React + TypeScript + Tailwind + Recharts Admin Console
-│   ├── mobile/                  # React Native CLI + TypeScript Admin Mobile App
-│   ├── package.json
-│   ├── README.md
-│   ├── start-all.bat
-│   └── start-web.bat
 ├── packages/
 │   └── shared-types/            # Shared TypeScript API contracts
-└── docs/
-    └── ADMIN_INTEGRATION_GUIDE.md
+├── docs/
+│   └── ADMIN_INTEGRATION_GUIDE.md
+├── start-all.bat
+└── start-web.bat
 ```
 
 ## Quick Start
@@ -34,7 +31,7 @@ This monorepo houses the **Single Shared Backend**, **Admin Website**, and **Adm
    npm run build:types
    npm run seed:admin
    ```
-4. Start the shared backend and Admin Website (`DocScan_admin/start-web.bat`) or all apps (`DocScan_admin/start-all.bat`):
+4. Start the shared backend and Admin Website (`start-web.bat`) or all apps (`start-all.bat`):
    ```bash
    npm run dev:backend
    npm run dev:web

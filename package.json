@@ -6,15 +6,15 @@
   "workspaces": [
     "packages/*",
     "backend",
-    "DocScan_admin/Admin_Website"
+    "Admin"
   ],
   "scripts": {
     "dev:backend": "npm --workspace=backend run dev",
-    "dev:web": "npm --workspace=DocScan_admin/Admin_Website run dev",
-    "start:mobile": "npm --prefix DocScan_admin/mobile start",
+    "dev:web": "npm --workspace=Admin run dev",
+    "start:mobile": "npm --prefix Admin_Mobile start",
     "build:types": "npm --workspace=packages/shared-types run build",
     "build:backend": "npm --workspace=backend run build",
-    "build:web": "npm --workspace=DocScan_admin/Admin_Website run build",
+    "build:web": "npm --workspace=Admin run build",
     "test:backend": "npm --workspace=backend test",
     "seed:admin": "npm --workspace=backend run seed:admin"
   }

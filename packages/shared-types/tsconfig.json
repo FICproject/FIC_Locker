@@ -3,11 +3,13 @@
     "target": "ES2022",
     "module": "CommonJS",
     "declaration": true,
+    "declarationMap": true,
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "types": []
   },
   "include": ["src/**/*"]
 }

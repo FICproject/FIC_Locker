@@ -1,6 +1,6 @@
 # Admin Panel Integration Guide — Shared Backend & Apps
 
-This document explains how the **Admin Website** (`DocScan_admin/Admin_Website`), **Admin Mobile App** (`DocScan_admin/mobile`), and the **Shared Backend Admin Modules** (`backend`) connect to the existing User Mobile App's Node.js + Express + MongoDB + Private Object Storage (S3) infrastructure.
+This document explains how the **Admin Website** (`Admin`), **Admin Mobile App** (`Admin_Mobile`), and the **Shared Backend Admin Modules** (`backend`) connect to the existing User Mobile App's Node.js + Express + MongoDB + Private Object Storage (S3) infrastructure.
 
 ## 1. Shared Backend & Database Architecture
 
@@ -41,6 +41,6 @@ If your teammate already has an Express entry point (`app.ts` / `server.ts`), mo
 4. **Firebase Cloud Messaging (FCM)**: Configure `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and `FIREBASE_PRIVATE_KEY` for push notifications.
 5. **Admin Reset Email (SMTP)**: Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`.
 6. **Admin Web & Mobile URLs**:
-   - Web: set `VITE_API_BASE_URL` in `DocScan_admin/Admin_Website/.env` (defaults to `/api/v1` via Vite proxy in dev).
-   - Mobile: set `API_BASE_URL` in `DocScan_admin/mobile/src/config/apiConfig.ts` (defaults to `http://10.0.2.2:5000/api/v1` for Android Emulator and `http://localhost:5000/api/v1` for iOS Simulator).
+   - Web: set `VITE_API_BASE_URL` in `Admin/.env` (defaults to `/api/v1` via Vite proxy in dev).
+   - Mobile: set `API_BASE_URL` in `Admin_Mobile/src/config/apiConfig.ts` (defaults to `http://10.0.2.2:5000/api/v1` for Android Emulator and `http://localhost:5000/api/v1` for iOS Simulator).
 

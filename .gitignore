@@ -27,12 +27,12 @@ Thumbs.db
 .idea/
 
 # React Native / Mobile
-DocScan_admin/mobile/android/.gradle/
-DocScan_admin/mobile/android/app/build/
-DocScan_admin/mobile/android/build/
-DocScan_admin/mobile/android/local.properties
-DocScan_admin/mobile/ios/Pods/
-DocScan_admin/mobile/ios/build/
+Admin_Mobile/android/.gradle/
+Admin_Mobile/android/app/build/
+Admin_Mobile/android/build/
+Admin_Mobile/android/local.properties
+Admin_Mobile/ios/Pods/
+Admin_Mobile/ios/build/
 *.keystore
 *.jks
 *.pbxproj.orig
