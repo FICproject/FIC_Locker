@@ -1,0 +1,14 @@
+{
+  "name": "docscan-admin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DocScan Cloud Admin Website & Mobile App scripts",
+  "scripts": {
+    "dev:web": "npm --prefix Admin_Website run dev",
+    "build:web": "npm --prefix Admin_Website run build",
+    "start:mobile": "npm --prefix mobile start",
+    "android": "npm --prefix mobile run android",
+    "dev:backend": "npm --prefix ../backend run dev"
+  }
+}
+

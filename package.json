@@ -1,0 +1,21 @@
+{
+  "name": "document-scanner-saas",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DocScan Cloud — Admin Website, Admin Mobile App, and Shared Backend",
+  "workspaces": [
+    "packages/*",
+    "backend",
+    "DocScan_admin/Admin_Website"
+  ],
+  "scripts": {
+    "dev:backend": "npm --workspace=backend run dev",
+    "dev:web": "npm --workspace=DocScan_admin/Admin_Website run dev",
+    "start:mobile": "npm --prefix DocScan_admin/mobile start",
+    "build:types": "npm --workspace=packages/shared-types run build",
+    "build:backend": "npm --workspace=backend run build",
+    "build:web": "npm --workspace=DocScan_admin/Admin_Website run build",
+    "test:backend": "npm --workspace=backend test",
+    "seed:admin": "npm --workspace=backend run seed:admin"
+  }
+}
