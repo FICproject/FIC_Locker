@@ -49,7 +49,7 @@ export function LoginScreen({ navigation }: Props) {
           <View style={styles.cloudMark}>
             <Text style={styles.cloudMarkText}>☁</Text>
           </View>
-          <Text style={styles.title}>DocScan Cloud</Text>
+          <Text style={styles.title}>FIC Locker</Text>
           <Text style={styles.tagline}>Scan • Store • Access — Admin Mobile</Text>
         </View>
 

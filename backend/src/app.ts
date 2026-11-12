@@ -42,7 +42,7 @@ export function createApp() {
   app.use(morgan(env.nodeEnv === 'test' ? 'tiny' : 'dev'));
 
   app.get('/health', (_req, res) => {
-    res.json({ success: true, status: 'ok', service: 'docscanner-shared-backend' });
+    res.json({ success: true, status: 'ok', service: 'fic-locker-shared-backend' });
   });
 
   // Shared payment webhook endpoint (used by Razorpay)

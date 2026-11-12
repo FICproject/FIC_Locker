@@ -2,7 +2,7 @@
   "name": "document-scanner-saas",
   "version": "1.0.0",
   "private": true,
-  "description": "DocScan Cloud — Admin Website, Admin Mobile App, and Shared Backend",
+  "description": "FIC Locker — Admin Website, Admin Mobile App, and Shared Backend",
   "workspaces": [
     "packages/*",
     "backend",

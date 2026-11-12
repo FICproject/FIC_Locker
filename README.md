@@ -1,4 +1,4 @@
-# DocScan Cloud — Admin Platform & Shared Backend
+# FIC Locker — Admin Platform & Shared Backend
 
 This monorepo houses the **Single Shared Backend**, **Admin Website**, and **Admin Mobile App** for the Document Scanner & Cloud Storage SaaS Platform.
 

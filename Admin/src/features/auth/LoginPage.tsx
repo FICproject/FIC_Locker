@@ -35,7 +35,7 @@ export function LoginPage() {
           <div className="p-3 rounded-2xl bg-blue-50 border border-blue-100 mb-3">
             <DocScanLogo size="lg" />
           </div>
-          <h1 className="text-2xl font-bold text-slate-900">DocScan Cloud</h1>
+          <h1 className="text-2xl font-bold text-slate-900">FIC Locker</h1>
           <p className="text-xs font-medium text-blue-600 tracking-wide mt-0.5">
             Scan • Store • Access — Admin Console
           </p>
@@ -90,7 +90,7 @@ export function LoginPage() {
             disabled={submitting}
             className="w-full py-3 px-4 bg-[#1D63DC] hover:bg-[#154FB8] disabled:opacity-60 text-white text-sm font-semibold rounded-xl shadow-md shadow-blue-600/20 transition cursor-pointer"
           >
-            {submitting ? 'Signing in...' : 'Sign In to DocScan Admin'}
+            {submitting ? 'Signing in...' : 'Sign In to FIC Locker Admin'}
           </button>
         </form>
       </div>

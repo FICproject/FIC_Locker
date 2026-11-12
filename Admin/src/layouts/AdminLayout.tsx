@@ -117,7 +117,7 @@ export function AdminLayout() {
       <div className="flex items-center justify-between px-5 pt-6 pb-5">
         <div className="flex flex-col items-center w-full text-center">
           <DocScanLogo light size="lg" />
-          <span className="mt-1.5 text-lg font-bold tracking-tight text-white">DocScan Cloud</span>
+          <span className="mt-1.5 text-lg font-bold tracking-tight text-white">FIC Locker</span>
           <span className="text-[11px] text-blue-200 tracking-wide">Scan • Store • Access</span>
         </div>
         <button className="lg:hidden text-blue-200 hover:text-white absolute right-4 top-5" onClick={() => setSidebarOpen(false)}>
@@ -251,7 +251,7 @@ export function AdminLayout() {
         </main>
 
         <footer className="px-4 lg:px-8 py-4 border-t border-slate-200/80 text-xs text-slate-500 flex flex-wrap items-center justify-between gap-2">
-          <span>DocScan Cloud &nbsp;|&nbsp; Admin Panel v1.0</span>
+          <span>FIC Locker &nbsp;|&nbsp; Admin Panel v1.0</span>
           <span className="inline-flex items-center gap-1">
             Powered by MERN Stack <Heart className="w-3.5 h-3.5 text-[#0B3B91] fill-[#0B3B91]" />
           </span>

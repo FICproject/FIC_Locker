@@ -53,7 +53,7 @@ export function DashboardScreen() {
 
         <View style={styles.brandCenter}>
           <Text style={styles.brandCloud}>☁</Text>
-          <Text style={styles.brandTitle}>DocScan Cloud</Text>
+          <Text style={styles.brandTitle}>FIC Locker</Text>
         </View>
 
         <TouchableOpacity

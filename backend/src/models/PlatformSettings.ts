@@ -31,7 +31,7 @@ const PlatformSettingsSchema = new Schema<IPlatformSettings>(
       unique: true,
       immutable: true,
     },
-    applicationName: { type: String, default: 'DocScanner Cloud' },
+    applicationName: { type: String, default: 'FIC Locker' },
     maxUploadSizeBytes: { type: Number, default: 25 * 1024 * 1024 },
     allowedFileFormats: { type: [String], default: ['application/pdf', 'image/jpeg', 'image/png'] },
     totalCloudStorageLimitBytes: { type: Number, default: 1024 * 1024 * 1024 * 1024 }, // 1 TB default
