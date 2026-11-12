@@ -288,5 +288,36 @@ describe('Admin Shared Backend API', () => {
       .set('Authorization', `Bearer ${newAccess}`);
     expect(afterLogout.status).toBe(401);
   });
+
+  it('increments admin event bus version sequence across mutations for cross-app live sync', async () => {
+    const loginRes = await request(app).post('/api/v1/admin/auth/login').send({
+      email: env.adminEmail,
+      password: env.adminPassword,
+    });
+    expect(loginRes.status).toBe(200);
+    const token = loginRes.body.data.accessToken as string;
+
+    const v1 = await request(app)
+      .get('/api/v1/admin/events/version')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Client-Platform', 'admin-mobile');
+    expect(v1.status).toBe(200);
+    const seqBefore = v1.body.data.seq as number;
+
+    const createCat = await request(app)
+      .post('/api/v1/admin/categories')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Client-Platform', 'admin-web')
+      .send({ name: 'Live Sync Test Category', description: 'Testing cross-app propagation' });
+    expect(createCat.status).toBe(201);
+
+    const v2 = await request(app)
+      .get('/api/v1/admin/events/version')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Client-Platform', 'admin-mobile');
+    expect(v2.status).toBe(200);
+    expect(v2.body.data.seq).toBeGreaterThan(seqBefore);
+    expect(v2.body.data.lastEvent?.sourceApp).toBe('admin-web');
+  });
 });
 

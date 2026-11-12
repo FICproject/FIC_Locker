@@ -18,6 +18,7 @@ import adminSupportRoutes from './modules/support/adminSupport.routes';
 import adminReportsRoutes from './modules/reports/adminReports.routes';
 import adminAuditLogsRoutes from './modules/audit-logs/adminAuditLogs.routes';
 import adminSettingsRoutes from './modules/settings/adminSettings.routes';
+import adminEventsRoutes from './modules/events/adminEvents.routes';
 
 export function createApp() {
   const app = express();
@@ -64,6 +65,7 @@ export function createApp() {
   adminRouter.use('/reports', adminReportsRoutes);
   adminRouter.use('/audit-logs', adminAuditLogsRoutes);
   adminRouter.use('/settings', adminSettingsRoutes);
+  adminRouter.use('/events', adminEventsRoutes);
 
   app.use(`${env.apiPrefix}/admin`, adminRouter);
 

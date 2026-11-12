@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -27,6 +27,7 @@ import { extractErrorMessage } from '../lib/apiClient';
 import { formatDateTime } from '../lib/format';
 import { Modal, ErrorBanner } from '../components/UiPrimitives';
 import { DocScanLogo } from '../components/BrandAssets';
+import { useAdminLiveSync } from '../hooks/useAdminLiveSync';
 
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -54,7 +55,7 @@ export function AdminLayout() {
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [loadingSessions, setLoadingSessions] = useState(false);
 
-  useEffect(() => {
+  const loadAlerts = useCallback(() => {
     adminApi.dashboard
       .getOverview(7)
       .then((d) => {
@@ -67,6 +68,12 @@ export function AdminLayout() {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    loadAlerts();
+  }, [loadAlerts]);
+
+  useAdminLiveSync(loadAlerts);
 
   const openSessionsModal = async () => {
     setSessionsOpen(true);

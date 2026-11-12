@@ -7,6 +7,7 @@ import type { AdminDocumentRecord } from '../../types/admin';
 import type { DocumentsStackParamList } from '../../navigation/types';
 import { formatBytes, formatDateTime } from '../../utils/format';
 import { ErrorView, LoadingView, StatusPill } from '../../components/MobilePrimitives';
+import { useMobileLiveSync } from '../../hooks/useMobileLiveSync';
 
 type Props = NativeStackScreenProps<DocumentsStackParamList, 'DocumentDetail'>;
 
@@ -18,23 +19,32 @@ export function DocumentDetailScreen({ route }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const detail = await adminMobileApi.documents.getById(documentId);
-      setDoc(detail);
-      setNotes(detail.operationalNotes || '');
-    } catch (err) {
-      setError(getErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [documentId]);
+  const load = useCallback(
+    async (silent = false) => {
+      if (!silent) setLoading(true);
+      if (!silent) setError(null);
+      try {
+        const detail = await adminMobileApi.documents.getById(documentId);
+        setDoc(detail);
+        if (!silent) {
+          setNotes(detail.operationalNotes || '');
+        }
+      } catch (err) {
+        if (!silent) setError(getErrorMessage(err));
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [documentId]
+  );
 
   useEffect(() => {
-    load();
+    load(false);
   }, [load]);
+
+  useMobileLiveSync(() => {
+    load(true);
+  });
 
   const handleOpenPresigned = async (mode: 'preview' | 'download') => {
     setBusy(true);
@@ -62,7 +72,7 @@ export function DocumentDetailScreen({ route }: Props) {
   };
 
   if (loading) return <LoadingView label="Loading document metadata..." />;
-  if (error) return <ErrorView message={error} onRetry={load} />;
+  if (error) return <ErrorView message={error} onRetry={() => load(false)} />;
   if (!doc) return null;
 
   return (

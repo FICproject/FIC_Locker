@@ -14,6 +14,7 @@ import type { SupportTicketRecord } from '../../types/admin';
 import type { SupportStackParamList } from '../../navigation/types';
 import { formatDateTime } from '../../utils/format';
 import { EmptyView, ErrorView, LoadingView, StatusPill } from '../../components/MobilePrimitives';
+import { useMobileLiveSync } from '../../hooks/useMobileLiveSync';
 
 type Props = NativeStackScreenProps<SupportStackParamList, 'SupportList'>;
 
@@ -25,28 +26,34 @@ export function SupportScreen({ navigation }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(
-    async (isRefresh = false) => {
-      if (isRefresh) setRefreshing(true);
-      else setLoading(true);
-      setError(null);
+    async (mode: 'initial' | 'refresh' | 'silent' = 'initial') => {
+      if (mode === 'refresh') setRefreshing(true);
+      else if (mode === 'initial') setLoading(true);
+      if (mode !== 'silent') setError(null);
       try {
         const list = await adminMobileApi.support.list({
           status: status === 'all' ? undefined : status,
         });
         setTickets(list);
       } catch (err) {
-        setError(getErrorMessage(err));
+        if (mode !== 'silent') setError(getErrorMessage(err));
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (mode !== 'silent') {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
     [status]
   );
 
   useEffect(() => {
-    load();
+    load('initial');
   }, [load]);
+
+  useMobileLiveSync(() => {
+    load('silent');
+  });
 
   return (
     <View style={styles.screen}>
@@ -71,7 +78,7 @@ export function SupportScreen({ navigation }: Props) {
           data={tickets}
           keyExtractor={(item) => item._id}
           contentContainerStyle={styles.listContent}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load('refresh')} />}
           ListEmptyComponent={<EmptyView title="No support tickets found" />}
           renderItem={({ item }) => (
             <TouchableOpacity

@@ -1,6 +1,7 @@
 import { Request } from 'express';
 import mongoose from 'mongoose';
 import { AuditLog } from '../models/AuditLog';
+import { adminEventBus } from './adminEventBus';
 
 export type SourceApp = 'admin-web' | 'admin-mobile';
 
@@ -34,6 +35,13 @@ export async function recordAuditLog(input: RecordAuditInput): Promise<void> {
     metadata: input.metadata,
     ipAddress: input.ipAddress,
     userAgent: input.userAgent,
+  });
+
+  adminEventBus.emitChange({
+    entityType: input.entityType,
+    action: input.action,
+    entityId: input.entityId,
+    sourceApp: input.sourceApp,
   });
 }
 

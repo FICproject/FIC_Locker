@@ -32,6 +32,7 @@ import { adminApi, DashboardPayload } from '../../services/adminApi';
 import { extractErrorMessage } from '../../lib/apiClient';
 import { formatBytes, formatCurrencyInr, formatDate } from '../../lib/format';
 import { EmptyState, ErrorBanner, LoadingState, StatusBadge } from '../../components/UiPrimitives';
+import { useAdminLiveSync } from '../../hooks/useAdminLiveSync';
 import {
   formatRelativeTime,
   SparklineWave,
@@ -46,16 +47,16 @@ export function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const payload = await adminApi.dashboard.getOverview(days);
       setData(payload);
     } catch (err) {
-      setError(extractErrorMessage(err));
+      if (!silent) setError(extractErrorMessage(err));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [days]);
 
@@ -63,8 +64,12 @@ export function DashboardPage() {
     load();
   }, [load]);
 
+  useAdminLiveSync(() => {
+    load(true);
+  });
+
   if (loading) return <LoadingState label="Loading platform telemetry..." />;
-  if (error) return <ErrorBanner message={error} onRetry={load} />;
+  if (error) return <ErrorBanner message={error} onRetry={() => load()} />;
   if (!data) return <EmptyState title="No dashboard data available" />;
 
   const { kpis, charts, recentRegistrations, recentActivities, alerts } = data;
@@ -109,7 +114,7 @@ export function DashboardPage() {
               <option value={90}>Last 90 Days</option>
             </select>
             <button
-              onClick={load}
+              onClick={() => load()}
               className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-white border border-slate-200 rounded-xl text-slate-700 hover:bg-slate-50 cursor-pointer"
             >
               <RefreshCw className="w-3.5 h-3.5" /> Refresh

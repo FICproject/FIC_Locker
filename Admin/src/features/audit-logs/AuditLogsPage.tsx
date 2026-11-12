@@ -3,6 +3,7 @@ import { Search } from 'lucide-react';
 import type { AuditLogRecord } from '@docscanner/shared-types';
 import { adminApi } from '../../services/adminApi';
 import { extractErrorMessage } from '../../lib/apiClient';
+import { useAdminLiveSync } from '../../hooks/useAdminLiveSync';
 import { formatDateTime } from '../../lib/format';
 import { EmptyState, ErrorBanner, LoadingState, Pagination } from '../../components/UiPrimitives';
 
@@ -18,8 +19,8 @@ export function AuditLogsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadLogs = useCallback(async () => {
-    setLoading(true);
+  const loadLogs = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const res = await adminApi.auditLogs.list({
@@ -33,15 +34,19 @@ export function AuditLogsPage() {
       setTotal(res.meta?.total ?? res.data.length);
       setTotalPages(res.meta?.totalPages ?? 1);
     } catch (err) {
-      setError(extractErrorMessage(err));
+      if (!silent) setError(extractErrorMessage(err));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [page, search, sourceApp, entityType]);
 
   useEffect(() => {
     loadLogs();
   }, [loadLogs]);
+
+  useAdminLiveSync(() => {
+    loadLogs(true);
+  });
 
   return (
     <div className="space-y-5">
@@ -50,7 +55,7 @@ export function AuditLogsPage() {
         <p className="text-sm text-slate-500">Immutable record of all privileged Admin activities across Web & Mobile</p>
       </div>
 
-      {error && <ErrorBanner message={error} onRetry={loadLogs} />}
+      {error && <ErrorBanner message={error} onRetry={() => loadLogs()} />}
 
       <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-wrap gap-3">
         <div className="relative flex-1 min-w-[200px]">

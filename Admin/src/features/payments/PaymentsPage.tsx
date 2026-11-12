@@ -3,6 +3,7 @@ import { Download, RotateCcw, Search } from 'lucide-react';
 import type { PaymentRecord } from '@docscanner/shared-types';
 import { adminApi } from '../../services/adminApi';
 import { extractErrorMessage } from '../../lib/apiClient';
+import { useAdminLiveSync } from '../../hooks/useAdminLiveSync';
 import { formatCurrencyInr, formatDateTime } from '../../lib/format';
 import {
   EmptyState,
@@ -32,8 +33,8 @@ export function PaymentsPage() {
   const [refundReason, setRefundReason] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const loadPayments = useCallback(async () => {
-    setLoading(true);
+  const loadPayments = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const res = await adminApi.payments.list({
@@ -47,15 +48,19 @@ export function PaymentsPage() {
       setTotal(res.meta?.total ?? res.data.length);
       setTotalPages(res.meta?.totalPages ?? 1);
     } catch (err) {
-      setError(extractErrorMessage(err));
+      if (!silent) setError(extractErrorMessage(err));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [page, search, statusFilter, methodFilter]);
 
   useEffect(() => {
     loadPayments();
   }, [loadPayments]);
+
+  useAdminLiveSync(() => {
+    loadPayments(true);
+  });
 
   const handleExport = async () => {
     try {
@@ -110,7 +115,7 @@ export function PaymentsPage() {
         </button>
       </div>
 
-      {error && <ErrorBanner message={error} onRetry={loadPayments} />}
+      {error && <ErrorBanner message={error} onRetry={() => loadPayments()} />}
       {success && <SuccessBanner message={success} onDismiss={() => setSuccess(null)} />}
 
       <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-wrap gap-3">

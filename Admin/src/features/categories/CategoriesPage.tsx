@@ -3,6 +3,7 @@ import { Edit3, Plus, Power, Trash2 } from 'lucide-react';
 import type { CategoryRecord } from '@docscanner/shared-types';
 import { adminApi } from '../../services/adminApi';
 import { extractErrorMessage } from '../../lib/apiClient';
+import { useAdminLiveSync } from '../../hooks/useAdminLiveSync';
 import {
   EmptyState,
   ErrorBanner,
@@ -24,22 +25,26 @@ export function CategoriesPage() {
   const [description, setDescription] = useState('');
   const [isActive, setIsActive] = useState(true);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const list = await adminApi.categories.list();
       setCategories(list);
     } catch (err) {
-      setError(extractErrorMessage(err));
+      if (!silent) setError(extractErrorMessage(err));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useAdminLiveSync(() => {
+    load(true);
+  });
 
   const openCreate = () => {
     setEditing(null);
@@ -111,7 +116,7 @@ export function CategoriesPage() {
         </button>
       </div>
 
-      {error && <ErrorBanner message={error} onRetry={load} />}
+      {error && <ErrorBanner message={error} onRetry={() => load()} />}
       {success && <SuccessBanner message={success} onDismiss={() => setSuccess(null)} />}
 
       {loading ? (

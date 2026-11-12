@@ -15,6 +15,7 @@ import type { AdminUserSummary } from '../../types/admin';
 import type { UsersStackParamList } from '../../navigation/types';
 import { formatBytes } from '../../utils/format';
 import { EmptyView, ErrorView, LoadingView, StatusPill } from '../../components/MobilePrimitives';
+import { useMobileLiveSync } from '../../hooks/useMobileLiveSync';
 
 type Props = NativeStackScreenProps<UsersStackParamList, 'UsersList'>;
 
@@ -27,10 +28,10 @@ export function UsersScreen({ navigation }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(
-    async (isRefresh = false) => {
-      if (isRefresh) setRefreshing(true);
-      else setLoading(true);
-      setError(null);
+    async (mode: 'initial' | 'refresh' | 'silent' = 'initial') => {
+      if (mode === 'refresh') setRefreshing(true);
+      else if (mode === 'initial') setLoading(true);
+      if (mode !== 'silent') setError(null);
       try {
         const list = await adminMobileApi.users.list({
           search: search.trim() || undefined,
@@ -38,18 +39,24 @@ export function UsersScreen({ navigation }: Props) {
         });
         setUsers(list);
       } catch (err) {
-        setError(getErrorMessage(err));
+        if (mode !== 'silent') setError(getErrorMessage(err));
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (mode !== 'silent') {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
     [search, status]
   );
 
   useEffect(() => {
-    load();
+    load('initial');
   }, [load]);
+
+  useMobileLiveSync(() => {
+    load('silent');
+  });
 
   return (
     <View style={styles.screen}>
@@ -85,7 +92,7 @@ export function UsersScreen({ navigation }: Props) {
           data={users}
           keyExtractor={(item) => item._id}
           contentContainerStyle={styles.listContent}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load('refresh')} />}
           ListEmptyComponent={<EmptyView title="No matching users found" />}
           renderItem={({ item }) => (
             <TouchableOpacity

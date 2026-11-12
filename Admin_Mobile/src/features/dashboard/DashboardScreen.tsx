@@ -8,6 +8,7 @@ import type { DashboardPayload } from '../../types/admin';
 import type { MainTabParamList } from '../../navigation/types';
 import { formatBytes, formatInr, formatRelativeTime } from '../../utils/format';
 import { ErrorView, LoadingView } from '../../components/MobilePrimitives';
+import { useMobileLiveSync } from '../../hooks/useMobileLiveSync';
 
 export function DashboardScreen() {
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList>>();
@@ -16,24 +17,30 @@ export function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
-    setError(null);
+  const load = useCallback(async (mode: 'initial' | 'refresh' | 'silent' = 'initial') => {
+    if (mode === 'refresh') setRefreshing(true);
+    else if (mode === 'initial') setLoading(true);
+    if (mode !== 'silent') setError(null);
     try {
       const payload = await adminMobileApi.dashboard.getOverview();
       setData(payload);
     } catch (err) {
-      setError(getErrorMessage(err));
+      if (mode !== 'silent') setError(getErrorMessage(err));
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (mode !== 'silent') {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    load();
+    load('initial');
   }, [load]);
+
+  useMobileLiveSync(() => {
+    load('silent');
+  });
 
   if (loading && !data) return <LoadingView label="Loading platform overview..." />;
   if (error && !data) return <ErrorView message={error} onRetry={() => load()} />;
@@ -72,7 +79,7 @@ export function DashboardScreen() {
       <ScrollView
         style={styles.screen}
         contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load('refresh')} />}
       >
         {/* Welcome Banner Card */}
         <View style={styles.welcomeCard}>

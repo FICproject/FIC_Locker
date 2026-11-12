@@ -5,6 +5,7 @@ import { getErrorMessage } from '../../services/apiClient';
 import type { StorageOverview } from '../../types/admin';
 import { formatBytes, formatDateTime } from '../../utils/format';
 import { EmptyView, ErrorView, KpiTile, LoadingView, StatusPill } from '../../components/MobilePrimitives';
+import { useMobileLiveSync } from '../../hooks/useMobileLiveSync';
 
 export function StorageScreen() {
   const [data, setData] = useState<StorageOverview | null>(null);
@@ -12,33 +13,39 @@ export function StorageScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
-    setError(null);
+  const load = useCallback(async (mode: 'initial' | 'refresh' | 'silent' = 'initial') => {
+    if (mode === 'refresh') setRefreshing(true);
+    else if (mode === 'initial') setLoading(true);
+    if (mode !== 'silent') setError(null);
     try {
       setData(await adminMobileApi.monitoring.storage());
     } catch (err) {
-      setError(getErrorMessage(err));
+      if (mode !== 'silent') setError(getErrorMessage(err));
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (mode !== 'silent') {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    load();
+    load('initial');
   }, [load]);
 
+  useMobileLiveSync(() => {
+    load('silent');
+  });
+
   if (loading && !data) return <LoadingView label="Loading storage telemetry..." />;
-  if (error && !data) return <ErrorView message={error} onRetry={() => load()} />;
+  if (error && !data) return <ErrorView message={error} onRetry={() => load('initial')} />;
   if (!data) return null;
 
   return (
     <ScrollView
       style={styles.screen}
       contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load('refresh')} />}
     >
       <View style={styles.grid}>
         <KpiTile label="Total Capacity" value={formatBytes(data.totalCapacityBytes)} />

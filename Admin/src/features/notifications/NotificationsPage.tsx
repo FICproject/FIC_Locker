@@ -7,6 +7,7 @@ import type {
 } from '@docscanner/shared-types';
 import { adminApi } from '../../services/adminApi';
 import { extractErrorMessage } from '../../lib/apiClient';
+import { useAdminLiveSync } from '../../hooks/useAdminLiveSync';
 import { formatDateTime } from '../../lib/format';
 import {
   EmptyState,
@@ -50,8 +51,8 @@ export function NotificationsPage() {
     channel: 'both' as 'in_app' | 'push' | 'both',
   });
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const loadData = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const [histRes, tplList, usersRes] = await Promise.all([
@@ -65,15 +66,19 @@ export function NotificationsPage() {
       setTemplates(tplList);
       setUsers(usersRes.data);
     } catch (err) {
-      setError(extractErrorMessage(err));
+      if (!silent) setError(extractErrorMessage(err));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [page]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useAdminLiveSync(() => {
+    loadData(true);
+  });
 
   const openCompose = (tpl?: NotificationTemplateRecord) => {
     setEditingBroadcast(null);
@@ -192,7 +197,7 @@ export function NotificationsPage() {
         </div>
       </div>
 
-      {error && <ErrorBanner message={error} onRetry={loadData} />}
+      {error && <ErrorBanner message={error} onRetry={() => loadData()} />}
       {success && <SuccessBanner message={success} onDismiss={() => setSuccess(null)} />}
 
       {loading ? (

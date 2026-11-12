@@ -3,6 +3,7 @@ import { MessageSquare, Search, Send } from 'lucide-react';
 import type { SupportTicketPriority, SupportTicketRecord, SupportTicketStatus } from '@docscanner/shared-types';
 import { adminApi } from '../../services/adminApi';
 import { extractErrorMessage } from '../../lib/apiClient';
+import { useAdminLiveSync } from '../../hooks/useAdminLiveSync';
 import { formatDateTime } from '../../lib/format';
 import {
   EmptyState,
@@ -33,8 +34,8 @@ export function SupportPage() {
   const [replyText, setReplyText] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const loadTickets = useCallback(async () => {
-    setLoading(true);
+  const loadTickets = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const res = await adminApi.support.list({
@@ -47,15 +48,22 @@ export function SupportPage() {
       setTotal(res.meta?.total ?? res.data.length);
       setTotalPages(res.meta?.totalPages ?? 1);
     } catch (err) {
-      setError(extractErrorMessage(err));
+      if (!silent) setError(extractErrorMessage(err));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [page, statusFilter, search]);
 
   useEffect(() => {
     loadTickets();
   }, [loadTickets]);
+
+  useAdminLiveSync(() => {
+    loadTickets(true);
+    if (activeTicket?._id) {
+      adminApi.support.getById(activeTicket._id).then(setActiveTicket).catch(() => {});
+    }
+  });
 
   const openTicket = async (ticketId: string) => {
     try {
@@ -116,7 +124,7 @@ export function SupportPage() {
         <p className="text-sm text-slate-500">Review user support tickets, update priority/status, add resolution notes, and reply</p>
       </div>
 
-      {error && <ErrorBanner message={error} onRetry={loadTickets} />}
+      {error && <ErrorBanner message={error} onRetry={() => loadTickets()} />}
       {success && <SuccessBanner message={success} onDismiss={() => setSuccess(null)} />}
 
       <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-wrap gap-3">

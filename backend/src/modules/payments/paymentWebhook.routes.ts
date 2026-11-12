@@ -3,6 +3,7 @@ import { asyncHandler, HttpError, sendSuccess } from '../../utils/apiResponse';
 import { verifyRazorpayWebhookSignature } from '../../services/razorpayService';
 import { Payment } from '../../models/Payment';
 import { Subscription } from '../../models/PlanAndSubscription';
+import { adminEventBus } from '../../services/adminEventBus';
 
 const router = Router();
 
@@ -82,6 +83,12 @@ router.post(
         }
 
         await payment.save();
+        adminEventBus.emitChange({
+          entityType: 'payment',
+          action: `WEBHOOK_${String(event.event || 'UPDATED').toUpperCase()}`,
+          entityId: payment._id.toString(),
+          sourceApp: 'razorpay',
+        });
       }
     }
 

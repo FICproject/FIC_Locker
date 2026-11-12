@@ -7,6 +7,7 @@ import type { AdminUserDetail } from '../../types/admin';
 import type { UsersStackParamList } from '../../navigation/types';
 import { formatBytes, formatDateTime } from '../../utils/format';
 import { ErrorView, LoadingView, StatusPill } from '../../components/MobilePrimitives';
+import { useMobileLiveSync } from '../../hooks/useMobileLiveSync';
 
 type Props = NativeStackScreenProps<UsersStackParamList, 'UserDetail'>;
 
@@ -18,22 +19,29 @@ export function UserDetailScreen({ route }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const detail = await adminMobileApi.users.getById(userId);
-      setUser(detail);
-    } catch (err) {
-      setError(getErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [userId]);
+  const load = useCallback(
+    async (silent = false) => {
+      if (!silent) setLoading(true);
+      if (!silent) setError(null);
+      try {
+        const detail = await adminMobileApi.users.getById(userId);
+        setUser(detail);
+      } catch (err) {
+        if (!silent) setError(getErrorMessage(err));
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [userId]
+  );
 
   useEffect(() => {
-    load();
+    load(false);
   }, [load]);
+
+  useMobileLiveSync(() => {
+    load(true);
+  });
 
   const handleToggleStatus = async (nextStatus: 'active' | 'suspended') => {
     setBusy(true);
@@ -50,7 +58,7 @@ export function UserDetailScreen({ route }: Props) {
   };
 
   if (loading) return <LoadingView label="Loading user profile..." />;
-  if (error) return <ErrorView message={error} onRetry={load} />;
+  if (error) return <ErrorView message={error} onRetry={() => load(false)} />;
   if (!user) return null;
 
   return (

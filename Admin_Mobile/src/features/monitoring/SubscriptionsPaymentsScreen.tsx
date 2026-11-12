@@ -5,6 +5,7 @@ import { getErrorMessage } from '../../services/apiClient';
 import type { PaymentRecord, SubscriptionRecord } from '../../types/admin';
 import { formatDateTime, formatInr } from '../../utils/format';
 import { EmptyView, ErrorView, LoadingView, StatusPill } from '../../components/MobilePrimitives';
+import { useMobileLiveSync } from '../../hooks/useMobileLiveSync';
 
 export function SubscriptionsPaymentsScreen() {
   const [tab, setTab] = useState<'subscriptions' | 'payments'>('subscriptions');
@@ -15,10 +16,10 @@ export function SubscriptionsPaymentsScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(
-    async (isRefresh = false) => {
-      if (isRefresh) setRefreshing(true);
-      else setLoading(true);
-      setError(null);
+    async (mode: 'initial' | 'refresh' | 'silent' = 'initial') => {
+      if (mode === 'refresh') setRefreshing(true);
+      else if (mode === 'initial') setLoading(true);
+      if (mode !== 'silent') setError(null);
       try {
         if (tab === 'subscriptions') {
           setSubs(await adminMobileApi.monitoring.subscriptions());
@@ -26,18 +27,24 @@ export function SubscriptionsPaymentsScreen() {
           setPayments(await adminMobileApi.monitoring.payments());
         }
       } catch (err) {
-        setError(getErrorMessage(err));
+        if (mode !== 'silent') setError(getErrorMessage(err));
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (mode !== 'silent') {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
     [tab]
   );
 
   useEffect(() => {
-    load();
+    load('initial');
   }, [load]);
+
+  useMobileLiveSync(() => {
+    load('silent');
+  });
 
   return (
     <View style={styles.screen}>
@@ -65,7 +72,7 @@ export function SubscriptionsPaymentsScreen() {
           data={subs}
           keyExtractor={(item) => item._id}
           contentContainerStyle={styles.list}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load('refresh')} />}
           ListEmptyComponent={<EmptyView title="No subscriptions found" />}
           renderItem={({ item }) => (
             <View style={styles.card}>
@@ -83,7 +90,7 @@ export function SubscriptionsPaymentsScreen() {
           data={payments}
           keyExtractor={(item) => item._id}
           contentContainerStyle={styles.list}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load('refresh')} />}
           ListEmptyComponent={<EmptyView title="No payment transactions found" />}
           renderItem={({ item }) => (
             <View style={styles.card}>

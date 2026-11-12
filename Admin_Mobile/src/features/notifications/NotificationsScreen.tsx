@@ -14,6 +14,7 @@ import { getErrorMessage } from '../../services/apiClient';
 import type { NotificationBroadcastRecord } from '../../types/admin';
 import { formatDateTime } from '../../utils/format';
 import { EmptyView, ErrorView, LoadingView, StatusPill } from '../../components/MobilePrimitives';
+import { useMobileLiveSync } from '../../hooks/useMobileLiveSync';
 
 export function NotificationsScreen() {
   const [items, setItems] = useState<NotificationBroadcastRecord[]>([]);
@@ -25,23 +26,29 @@ export function NotificationsScreen() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
-    setError(null);
+  const load = useCallback(async (mode: 'initial' | 'refresh' | 'silent' = 'initial') => {
+    if (mode === 'refresh') setRefreshing(true);
+    else if (mode === 'initial') setLoading(true);
+    if (mode !== 'silent') setError(null);
     try {
       setItems(await adminMobileApi.notifications.list());
     } catch (err) {
-      setError(getErrorMessage(err));
+      if (mode !== 'silent') setError(getErrorMessage(err));
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (mode !== 'silent') {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    load();
+    load('initial');
   }, [load]);
+
+  useMobileLiveSync(() => {
+    load('silent');
+  });
 
   const handleSend = async () => {
     if (!title.trim() || !body.trim()) {
@@ -99,7 +106,7 @@ export function NotificationsScreen() {
           data={items}
           keyExtractor={(item) => item._id}
           contentContainerStyle={styles.list}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load('refresh')} />}
           ListEmptyComponent={<EmptyView title="No notification history" />}
           renderItem={({ item }) => (
             <View style={styles.card}>

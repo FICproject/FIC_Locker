@@ -5,6 +5,7 @@ import { getErrorMessage } from '../../services/apiClient';
 import type { AuditLogRecord } from '../../types/admin';
 import { formatDateTime } from '../../utils/format';
 import { EmptyView, ErrorView, LoadingView, StatusPill } from '../../components/MobilePrimitives';
+import { useMobileLiveSync } from '../../hooks/useMobileLiveSync';
 
 export function AuditLogsScreen() {
   const [logs, setLogs] = useState<AuditLogRecord[]>([]);
@@ -14,25 +15,31 @@ export function AuditLogsScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(
-    async (isRefresh = false) => {
-      if (isRefresh) setRefreshing(true);
-      else setLoading(true);
-      setError(null);
+    async (mode: 'initial' | 'refresh' | 'silent' = 'initial') => {
+      if (mode === 'refresh') setRefreshing(true);
+      else if (mode === 'initial') setLoading(true);
+      if (mode !== 'silent') setError(null);
       try {
         setLogs(await adminMobileApi.auditLogs.list(sourceApp === 'all' ? undefined : sourceApp));
       } catch (err) {
-        setError(getErrorMessage(err));
+        if (mode !== 'silent') setError(getErrorMessage(err));
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (mode !== 'silent') {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
     [sourceApp]
   );
 
   useEffect(() => {
-    load();
+    load('initial');
   }, [load]);
+
+  useMobileLiveSync(() => {
+    load('silent');
+  });
 
   return (
     <View style={styles.screen}>
@@ -57,7 +64,7 @@ export function AuditLogsScreen() {
           data={logs}
           keyExtractor={(item) => item._id}
           contentContainerStyle={styles.list}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load('refresh')} />}
           ListEmptyComponent={<EmptyView title="No audit logs found" />}
           renderItem={({ item }) => (
             <View style={styles.card}>

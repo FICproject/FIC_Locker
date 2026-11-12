@@ -3,6 +3,7 @@ import { Edit3, Plus, Power } from 'lucide-react';
 import type { PlanRecord, SubscriptionSummary } from '@docscanner/shared-types';
 import { adminApi } from '../../services/adminApi';
 import { extractErrorMessage } from '../../lib/apiClient';
+import { useAdminLiveSync } from '../../hooks/useAdminLiveSync';
 import { formatBytes, formatCurrencyInr, formatDate } from '../../lib/format';
 import {
   EmptyState,
@@ -46,21 +47,21 @@ export function SubscriptionsPage() {
     isActive: true,
   });
 
-  const loadPlans = useCallback(async () => {
-    setLoading(true);
+  const loadPlans = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const data = await adminApi.plans.list();
       setPlans(data);
     } catch (err) {
-      setError(extractErrorMessage(err));
+      if (!silent) setError(extractErrorMessage(err));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
-  const loadSubscriptions = useCallback(async () => {
-    setLoading(true);
+  const loadSubscriptions = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const res = await adminApi.plans.listSubscriptions({
@@ -73,9 +74,9 @@ export function SubscriptionsPage() {
       setTotal(res.meta?.total ?? res.data.length);
       setTotalPages(res.meta?.totalPages ?? 1);
     } catch (err) {
-      setError(extractErrorMessage(err));
+      if (!silent) setError(extractErrorMessage(err));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [page, subStatus, renewalFilter]);
 
@@ -83,6 +84,11 @@ export function SubscriptionsPage() {
     if (tab === 'plans') loadPlans();
     else loadSubscriptions();
   }, [tab, loadPlans, loadSubscriptions]);
+
+  useAdminLiveSync(() => {
+    if (tab === 'plans') loadPlans(true);
+    else loadSubscriptions(true);
+  });
 
   const openCreateModal = () => {
     setEditingPlan(null);
@@ -195,7 +201,7 @@ export function SubscriptionsPage() {
         </div>
       </div>
 
-      {error && <ErrorBanner message={error} onRetry={tab === 'plans' ? loadPlans : loadSubscriptions} />}
+      {error && <ErrorBanner message={error} onRetry={() => (tab === 'plans' ? loadPlans() : loadSubscriptions())} />}
       {success && <SuccessBanner message={success} onDismiss={() => setSuccess(null)} />}
 
       {loading ? (

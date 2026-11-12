@@ -3,6 +3,7 @@ import { Download, Filter } from 'lucide-react';
 import { adminApi } from '../../services/adminApi';
 import { extractErrorMessage } from '../../lib/apiClient';
 import { EmptyState, ErrorBanner, LoadingState } from '../../components/UiPrimitives';
+import { useAdminLiveSync } from '../../hooks/useAdminLiveSync';
 
 const REPORT_OPTIONS = [
   { id: 'user-registration', label: 'User Registration Report' },
@@ -24,25 +25,32 @@ export function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadReport = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await adminApi.reports.getReport(reportType, {
-        from: from || undefined,
-        to: to || undefined,
-      });
-      setData(res);
-    } catch (err) {
-      setError(extractErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [reportType, from, to]);
+  const loadReport = useCallback(
+    async (silent = false) => {
+      if (!silent) setLoading(true);
+      setError(null);
+      try {
+        const res = await adminApi.reports.getReport(reportType, {
+          from: from || undefined,
+          to: to || undefined,
+        });
+        setData(res);
+      } catch (err) {
+        if (!silent) setError(extractErrorMessage(err));
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [reportType, from, to]
+  );
 
   useEffect(() => {
     loadReport();
   }, [loadReport]);
+
+  useAdminLiveSync(() => {
+    void loadReport(true);
+  });
 
   const handleExport = async () => {
     try {
@@ -112,7 +120,9 @@ export function ReportsPage() {
           />
         </div>
         <button
-          onClick={loadReport}
+          onClick={() => {
+            void loadReport(false);
+          }}
           className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer"
         >
           <Filter className="w-4 h-4" /> Apply

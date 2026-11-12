@@ -15,6 +15,7 @@ import type { AdminDocumentRecord, UploadExceptionRecord } from '../../types/adm
 import type { DocumentsStackParamList } from '../../navigation/types';
 import { formatBytes, formatDateTime } from '../../utils/format';
 import { EmptyView, ErrorView, LoadingView, StatusPill } from '../../components/MobilePrimitives';
+import { useMobileLiveSync } from '../../hooks/useMobileLiveSync';
 
 type Props = NativeStackScreenProps<DocumentsStackParamList, 'DocumentsList'>;
 
@@ -28,10 +29,10 @@ export function DocumentsScreen({ navigation }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(
-    async (isRefresh = false) => {
-      if (isRefresh) setRefreshing(true);
-      else setLoading(true);
-      setError(null);
+    async (mode: 'initial' | 'refresh' | 'silent' = 'initial') => {
+      if (mode === 'refresh') setRefreshing(true);
+      else if (mode === 'initial') setLoading(true);
+      if (mode !== 'silent') setError(null);
       try {
         if (tab === 'all') {
           const list = await adminMobileApi.documents.list({ search: search.trim() || undefined });
@@ -41,18 +42,24 @@ export function DocumentsScreen({ navigation }: Props) {
           setFailed(list);
         }
       } catch (err) {
-        setError(getErrorMessage(err));
+        if (mode !== 'silent') setError(getErrorMessage(err));
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (mode !== 'silent') {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
     [tab, search]
   );
 
   useEffect(() => {
-    load();
+    load('initial');
   }, [load]);
+
+  useMobileLiveSync(() => {
+    load('silent');
+  });
 
   return (
     <View style={styles.screen}>
@@ -92,7 +99,7 @@ export function DocumentsScreen({ navigation }: Props) {
           data={docs}
           keyExtractor={(item) => item._id}
           contentContainerStyle={styles.listContent}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load('refresh')} />}
           ListEmptyComponent={<EmptyView title="No documents found" />}
           renderItem={({ item }) => (
             <TouchableOpacity
@@ -117,7 +124,7 @@ export function DocumentsScreen({ navigation }: Props) {
           data={failed}
           keyExtractor={(item) => item._id}
           contentContainerStyle={styles.listContent}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load('refresh')} />}
           ListEmptyComponent={<EmptyView title="No failed uploads recorded" />}
           renderItem={({ item }) => (
             <View style={styles.card}>

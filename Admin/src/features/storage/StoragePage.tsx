@@ -4,6 +4,7 @@ import { HardDrive, AlertOctagon, Users, Layers } from 'lucide-react';
 import type { StorageOverview } from '@docscanner/shared-types';
 import { adminApi } from '../../services/adminApi';
 import { extractErrorMessage } from '../../lib/apiClient';
+import { useAdminLiveSync } from '../../hooks/useAdminLiveSync';
 import { formatBytes, formatDateTime } from '../../lib/format';
 import { EmptyState, ErrorBanner, LoadingState, StatCard, StatusBadge } from '../../components/UiPrimitives';
 
@@ -12,16 +13,16 @@ export function StoragePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const overview = await adminApi.storage.getOverview();
       setData(overview);
     } catch (err) {
-      setError(extractErrorMessage(err));
+      if (!silent) setError(extractErrorMessage(err));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -29,8 +30,12 @@ export function StoragePage() {
     load();
   }, [load]);
 
+  useAdminLiveSync(() => {
+    load(true);
+  });
+
   if (loading) return <LoadingState label="Analyzing cloud storage utilization..." />;
-  if (error) return <ErrorBanner message={error} onRetry={load} />;
+  if (error) return <ErrorBanner message={error} onRetry={() => load()} />;
   if (!data) return <EmptyState title="No storage telemetry available" />;
 
   return (

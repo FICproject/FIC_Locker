@@ -3,6 +3,7 @@ import { Download, Eye, FileWarning, Search, Wrench } from 'lucide-react';
 import type { AdminDocumentRecord, CategoryRecord, StorageOverview } from '@docscanner/shared-types';
 import { adminApi } from '../../services/adminApi';
 import { extractErrorMessage } from '../../lib/apiClient';
+import { useAdminLiveSync } from '../../hooks/useAdminLiveSync';
 import { formatBytes, formatDateTime } from '../../lib/format';
 import {
   EmptyState,
@@ -42,8 +43,8 @@ export function DocumentsPage() {
     adminApi.categories.list().then(setCategories).catch(() => {});
   }, []);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const loadData = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       if (tab === 'all') {
@@ -65,15 +66,22 @@ export function DocumentsPage() {
         setTotalPages(res.meta?.totalPages ?? 1);
       }
     } catch (err) {
-      setError(extractErrorMessage(err));
+      if (!silent) setError(extractErrorMessage(err));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [tab, page, search, categoryFilter, statusFilter, userIdFilter]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useAdminLiveSync(() => {
+    loadData(true);
+    if (selectedDoc?._id) {
+      adminApi.documents.getById(selectedDoc._id).then(setSelectedDoc).catch(() => {});
+    }
+  });
 
   const handleOpenDoc = async (docId: string) => {
     try {
@@ -157,7 +165,7 @@ export function DocumentsPage() {
         </div>
       </div>
 
-      {error && <ErrorBanner message={error} onRetry={loadData} />}
+      {error && <ErrorBanner message={error} onRetry={() => loadData()} />}
       {success && <SuccessBanner message={success} onDismiss={() => setSuccess(null)} />}
 
       {tab === 'all' && (

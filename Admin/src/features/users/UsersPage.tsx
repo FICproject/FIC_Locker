@@ -4,6 +4,7 @@ import { Eye, Search, ShieldAlert, UserCheck, UserX } from 'lucide-react';
 import type { AdminUserDetail, AdminUserSummary } from '@docscanner/shared-types';
 import { adminApi } from '../../services/adminApi';
 import { extractErrorMessage } from '../../lib/apiClient';
+import { useAdminLiveSync } from '../../hooks/useAdminLiveSync';
 import { formatBytes, formatDate, formatDateTime } from '../../lib/format';
 import {
   EmptyState,
@@ -41,8 +42,8 @@ export function UsersPage() {
   const [actionNotes, setActionNotes] = useState('');
   const [actionBusy, setActionBusy] = useState(false);
 
-  const loadUsers = useCallback(async () => {
-    setLoading(true);
+  const loadUsers = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const res = await adminApi.users.list({
@@ -56,15 +57,22 @@ export function UsersPage() {
       setTotal(res.meta?.total ?? res.data.length);
       setTotalPages(res.meta?.totalPages ?? 1);
     } catch (err) {
-      setError(extractErrorMessage(err));
+      if (!silent) setError(extractErrorMessage(err));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [page, search, statusFilter, requestType]);
 
   useEffect(() => {
     loadUsers();
   }, [loadUsers]);
+
+  useAdminLiveSync(() => {
+    loadUsers(true);
+    if (selectedUser?._id) {
+      adminApi.users.getById(selectedUser._id).then(setSelectedUser).catch(() => {});
+    }
+  });
 
   const openUserDetail = async (userId: string) => {
     setDetailLoading(true);
@@ -129,7 +137,7 @@ export function UsersPage() {
         <p className="text-sm text-slate-500">Manage registered accounts, statuses, recovery escalations, and deletion requests</p>
       </div>
 
-      {error && <ErrorBanner message={error} onRetry={loadUsers} />}
+      {error && <ErrorBanner message={error} onRetry={() => loadUsers()} />}
       {success && <SuccessBanner message={success} onDismiss={() => setSuccess(null)} />}
 
       {/* Filters */}
