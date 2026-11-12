@@ -16,7 +16,6 @@ import {
   LogOut,
   Menu,
   X,
-  Search,
   ChevronDown,
   Laptop,
   Heart,
@@ -48,7 +47,6 @@ export function AdminLayout() {
   const { admin, logout } = useAuth();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [globalSearch, setGlobalSearch] = useState('');
   const [alertCount, setAlertCount] = useState(0);
 
   const [sessionsOpen, setSessionsOpen] = useState(false);
@@ -69,13 +67,6 @@ export function AdminLayout() {
       })
       .catch(() => {});
   }, []);
-
-  const handleGlobalSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    const q = globalSearch.trim();
-    if (!q) return;
-    navigate(`/users?search=${encodeURIComponent(q)}`);
-  };
 
   const openSessionsModal = async () => {
     setSessionsOpen(true);
@@ -185,12 +176,12 @@ export function AdminLayout() {
   return (
     <div className="min-h-screen flex bg-[#F3F7FD]">
       {/* Desktop Sidebar */}
-      <aside className="hidden lg:block shrink-0">{sidebarContent}</aside>
+      <aside className="hidden lg:block shrink-0 lg:sticky lg:top-0 lg:h-screen">{sidebarContent}</aside>
 
       {/* Mobile Drawer */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-40 lg:hidden flex">
-          <div className="relative z-50">{sidebarContent}</div>
+          <div className="relative z-50 h-full">{sidebarContent}</div>
           <div className="flex-1 bg-slate-900/50" onClick={() => setSidebarOpen(false)} />
         </div>
       )}
@@ -198,23 +189,13 @@ export function AdminLayout() {
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0">
         <header className="sticky top-0 z-20 bg-[#F3F7FD]/90 backdrop-blur-sm border-b border-slate-200/70 px-4 lg:px-8 h-16 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 flex-1 max-w-md">
+          <div className="flex items-center gap-3">
             <button
               onClick={() => setSidebarOpen(true)}
               className="lg:hidden p-2 rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
             >
               <Menu className="w-5 h-5" />
             </button>
-            <form onSubmit={handleGlobalSearch} className="relative flex-1">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5" />
-              <input
-                type="text"
-                value={globalSearch}
-                onChange={(e) => setGlobalSearch(e.target.value)}
-                placeholder="Search users, documents..."
-                className="w-full pl-10 pr-4 py-2 text-sm bg-white border border-slate-200 rounded-full shadow-2xs focus:outline-none focus:ring-2 focus:ring-[#1D63DC]"
-              />
-            </form>
           </div>
 
           <div className="flex items-center gap-3">
