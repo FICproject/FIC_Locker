@@ -27,12 +27,13 @@ Thumbs.db
 .idea/
 
 # React Native / Mobile
-Admin_Mobile/android/.gradle/
-Admin_Mobile/android/app/build/
-Admin_Mobile/android/build/
-Admin_Mobile/android/local.properties
-Admin_Mobile/ios/Pods/
-Admin_Mobile/ios/build/
+.gradle/
+**/android/.gradle/
+**/android/app/build/
+**/android/build/
+**/android/local.properties
+**/ios/Pods/
+**/ios/build/
 *.keystore
 *.jks
 *.pbxproj.orig
