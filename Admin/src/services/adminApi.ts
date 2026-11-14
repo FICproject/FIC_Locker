@@ -152,6 +152,10 @@ export const adminApi = {
       const res = await apiClient.patch<ApiResponse<PlanRecord>>(`/admin/plans/${planId}/status`, { isActive });
       return res.data.data;
     },
+    delete: async (planId: string) => {
+      const res = await apiClient.delete<ApiResponse<{ deleted: boolean; _id: string }>>(`/admin/plans/${planId}`);
+      return res.data;
+    },
     listSubscriptions: async (params: { page?: number; limit?: number; status?: string; renewal?: string }) => {
       const res = await apiClient.get<ApiResponse<SubscriptionSummary[]>>('/admin/subscriptions', { params });
       return res.data;

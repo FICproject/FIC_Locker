@@ -1,9 +1,14 @@
 import bcrypt from 'bcryptjs';
+import mongoose from 'mongoose';
 import { env } from '../config/env';
 import { AdminCredential } from '../models/AdminCredential';
 import { PlatformSettings } from '../models/PlatformSettings';
 import { DocumentCategory } from '../models/Category';
 import { Plan } from '../models/PlanAndSubscription';
+import { User } from '../models/User';
+
+export const FIXED_ADMIN_ID = new mongoose.Types.ObjectId('6af600000000000000000001');
+export const DEFAULT_USER_ID = new mongoose.Types.ObjectId('6af600000000000000000002');
 
 const DEFAULT_CATEGORIES = [
   { name: 'Personal Documents', slug: 'personal-documents', description: 'Personal records and certificates', icon: 'user' },
@@ -55,15 +60,22 @@ const DEFAULT_PLANS = [
 
 export async function ensureBaselineSeed(): Promise<void> {
   const existingAdmin = await AdminCredential.findOne({ singletonKey: 'PLATFORM_ADMIN' });
+  const passwordHash = await bcrypt.hash(env.adminPassword, 12);
   if (!existingAdmin) {
-    const passwordHash = await bcrypt.hash(env.adminPassword, 12);
     await AdminCredential.create({
+      _id: FIXED_ADMIN_ID,
       singletonKey: 'PLATFORM_ADMIN',
       email: env.adminEmail.toLowerCase(),
       name: env.adminName,
       passwordHash,
     });
     console.info(`[Bootstrap] Seeded single Platform Admin account (${env.adminEmail}).`);
+  } else {
+    existingAdmin.email = env.adminEmail.toLowerCase();
+    existingAdmin.name = env.adminName;
+    existingAdmin.passwordHash = passwordHash;
+    await existingAdmin.save();
+    console.info(`[Bootstrap] Updated Platform Admin account (${env.adminEmail}).`);
   }
 
   const existingSettings = await PlatformSettings.findOne({ singletonKey: 'PLATFORM_SETTINGS' });
@@ -81,6 +93,20 @@ export async function ensureBaselineSeed(): Promise<void> {
   const planCount = await Plan.countDocuments({});
   if (planCount === 0) {
     await Plan.insertMany(DEFAULT_PLANS);
+  }
+
+  const userCount = await User.countDocuments({});
+  if (userCount === 0) {
+    await User.create({
+      _id: DEFAULT_USER_ID,
+      fullName: 'Dhanu Sri',
+      email: 'dhanu.sri@gmail.com',
+      status: 'active',
+      isEmailVerified: true,
+      storageUsedBytes: 0,
+      totalDocuments: 0,
+    });
+    console.info('[Bootstrap] Seeded default user (Dhanu Sri).');
   }
 }
 

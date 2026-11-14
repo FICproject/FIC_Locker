@@ -1,48 +1,82 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Alert,
+  ActivityIndicator,
+  RefreshControl,
+} from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { colors, typography, borderRadius, shadows } from '../../theme';
 import { subscriptionService } from '../../services/api/documentService';
+import type { SubscriptionPlan, UserSubscription } from '../../types';
+import { formatBytes } from '../../utils/formatters';
 
 export const SubscriptionScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
+  const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
+  const [currentSub, setCurrentSub] = useState<UserSubscription | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const plans = [
-    {
-      id: 'free',
-      name: 'Starter',
-      price: '$0',
-      storage: '1 GB Cloud Storage',
-      features: ['Basic Scanning', 'Mobile Access', 'Standard Resolution'],
-    },
-    {
-      id: 'pro',
-      name: 'Pro Scanner',
-      price: billingCycle === 'monthly' ? '$4.99/mo' : '$49/yr',
-      storage: '50 GB Cloud Storage',
-      popular: true,
-      features: [
-        'Automatic Edge Detection',
-        'Unlimited PDF Export',
-        'Perspective Correction',
-        'Document Expiry Reminders',
-        'Priority Support',
-      ],
-    },
-  ];
+  const loadPlans = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
+    setErrorMessage(null);
 
-  const handleSubscribe = async (planId: string) => {
-    if (planId === 'free') return;
+    try {
+      const [fetchedPlans, fetchedSub] = await Promise.all([
+        subscriptionService.getPlans(),
+        subscriptionService.getCurrentSubscription().catch(() => null),
+      ]);
+      setPlans(fetchedPlans);
+      setCurrentSub(fetchedSub);
+      if (fetchedPlans.length === 0) {
+        setErrorMessage('No active subscription plans returned by the server.');
+      }
+    } catch (e: any) {
+      console.warn('[SubscriptionScreen] Failed to load plans:', e);
+      setErrorMessage(e?.message || 'Failed to connect to backend server.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadPlans();
+    }, [loadPlans])
+  );
+
+  useEffect(() => {
+    loadPlans();
+  }, [loadPlans]);
+
+  const handleSubscribe = async (planId: string, planCode?: string) => {
+    if (planCode === 'free' || planId === 'free') return;
     try {
       Alert.alert('Payment Processing', 'Redirecting to secure backend checkout session...');
       await subscriptionService.upgradePlan(planId, billingCycle);
-      Alert.alert('Payment Initiated', 'Waiting for verified backend webhook confirmation before updating entitlements.');
+      Alert.alert(
+        'Payment Initiated',
+        'Waiting for verified backend webhook confirmation before updating entitlements.'
+      );
     } catch (e) {
       Alert.alert('Notice', 'Checkout session initialized via secure backend.');
     }
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.scrollContent}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadPlans(true)} />}
+    >
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Text style={styles.backText}>←</Text>
@@ -67,41 +101,91 @@ export const SubscriptionScreen: React.FC<{ navigation: any }> = ({ navigation }
           onPress={() => setBillingCycle('annual')}
         >
           <Text style={[styles.switchText, billingCycle === 'annual' && styles.switchTextActive]}>
-            Annual (Save 20%)
+            Annual (Save ~20%)
           </Text>
         </TouchableOpacity>
       </View>
 
-      {/* Plan Cards */}
-      {plans.map((p) => (
-        <View key={p.id} style={[styles.card, p.popular && styles.popularCard]}>
-          {p.popular && (
-            <View style={styles.popularBadge}>
-              <Text style={styles.popularBadgeText}>MOST POPULAR</Text>
-            </View>
-          )}
-          <Text style={styles.planName}>{p.name}</Text>
-          <Text style={styles.planPrice}>{p.price}</Text>
-          <Text style={styles.planStorage}>{p.storage}</Text>
-
-          <View style={styles.divider} />
-
-          {p.features.map((f, i) => (
-            <Text key={i} style={styles.featureItem}>
-              ✓  {f}
-            </Text>
-          ))}
-
+      {loading && !refreshing ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingText}>Loading subscription plans...</Text>
+        </View>
+      ) : plans.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>
+            {errorMessage || 'No subscription plans currently available.'}
+          </Text>
           <TouchableOpacity
-            style={[styles.planBtn, p.popular ? styles.popularBtn : styles.starterBtn]}
-            onPress={() => handleSubscribe(p.id)}
+            style={styles.retryBtn}
+            onPress={() => loadPlans(true)}
+            activeOpacity={0.8}
           >
-            <Text style={[styles.planBtnText, p.popular ? styles.popularBtnText : styles.starterBtnText]}>
-              {p.id === 'free' ? 'Current Plan' : 'Upgrade to ' + p.name}
-            </Text>
+            <Text style={styles.retryBtnText}>↻ Refresh Plans</Text>
           </TouchableOpacity>
         </View>
-      ))}
+      ) : (
+        plans.map((p) => {
+          const isCurrent =
+            p.code === 'free' ||
+            currentSub?.planId === p._id ||
+            currentSub?.planName?.toLowerCase() === p.name.toLowerCase();
+
+          const monthlyPrice = p.monthlyPriceInr ?? p.priceMonthly ?? 0;
+          const annualPrice = p.annualPriceInr ?? p.priceAnnually ?? 0;
+          const priceDisplay =
+            billingCycle === 'monthly'
+              ? monthlyPrice === 0
+                ? '₹0'
+                : `₹${monthlyPrice}/mo`
+              : annualPrice === 0
+              ? '₹0'
+              : `₹${annualPrice}/yr`;
+
+          const storageBytes = p.storageLimitBytes ?? p.storageQuotaBytes ?? 0;
+          const storageDisplay = storageBytes > 0 ? `${formatBytes(storageBytes)} Cloud Storage` : '';
+
+          const isPopular =
+            p.isPopular || p.code === 'plus' || p.code === 'pro' || p.name.toLowerCase().includes('plus');
+
+          return (
+            <View key={p._id || p.code} style={[styles.card, isPopular && styles.popularCard]}>
+              {isPopular && (
+                <View style={styles.popularBadge}>
+                  <Text style={styles.popularBadgeText}>MOST POPULAR</Text>
+                </View>
+              )}
+              <Text style={styles.planName}>{p.name}</Text>
+              <Text style={styles.planPrice}>{priceDisplay}</Text>
+              {storageDisplay ? <Text style={styles.planStorage}>{storageDisplay}</Text> : null}
+              {p.description ? <Text style={styles.planDesc}>{p.description}</Text> : null}
+
+              <View style={styles.divider} />
+
+              {(p.features || []).map((f, i) => (
+                <Text key={i} style={styles.featureItem}>
+                  ✓  {f}
+                </Text>
+              ))}
+
+              <TouchableOpacity
+                style={[styles.planBtn, isPopular ? styles.popularBtn : styles.starterBtn]}
+                onPress={() => handleSubscribe(p._id, p.code)}
+                disabled={isCurrent}
+              >
+                <Text
+                  style={[
+                    styles.planBtnText,
+                    isPopular ? styles.popularBtnText : styles.starterBtnText,
+                  ]}
+                >
+                  {isCurrent ? 'Current Plan' : `Upgrade to ${p.name}`}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          );
+        })
+      )}
     </ScrollView>
   );
 };
@@ -158,6 +242,39 @@ const styles = StyleSheet.create({
   switchTextActive: {
     color: '#FFFFFF',
   },
+  loadingContainer: {
+    paddingVertical: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: colors.textSecondary,
+  },
+  emptyContainer: {
+    paddingVertical: 50,
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginBottom: 16,
+    lineHeight: 20,
+  },
+  retryBtn: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: borderRadius.pill,
+  },
+  retryBtnText: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
   card: {
     backgroundColor: colors.surface,
     padding: 24,
@@ -199,6 +316,11 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontWeight: '500',
   },
+  planDesc: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
   divider: {
     height: 1,
     backgroundColor: colors.borderLight,
@@ -216,6 +338,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 14,
   },
+  planBtnText: {
+    fontSize: 14,
+  },
   popularBtn: {
     backgroundColor: colors.primary,
     ...shadows.glow,
@@ -232,4 +357,3 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
 });
-

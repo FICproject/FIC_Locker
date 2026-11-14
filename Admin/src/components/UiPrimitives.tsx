@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Inbox, Loader2, X } from 'lucide-react';
 
 export function StatusBadge({ status }: { status?: string | null }) {
@@ -129,7 +129,23 @@ export function ErrorBanner({
   );
 }
 
-export function SuccessBanner({ message, onDismiss }: { message: string; onDismiss?: () => void }) {
+export function SuccessBanner({
+  message,
+  onDismiss,
+  durationMs = 5000,
+}: {
+  message: string;
+  onDismiss?: () => void;
+  durationMs?: number;
+}) {
+  useEffect(() => {
+    if (!onDismiss || !durationMs) return;
+    const timer = setTimeout(() => {
+      onDismiss();
+    }, durationMs);
+    return () => clearTimeout(timer);
+  }, [message, onDismiss, durationMs]);
+
   return (
     <div className="flex items-center justify-between gap-4 p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm">
       <div className="flex items-center gap-2.5">

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,10 @@ import {
   TextInput,
   RefreshControl,
   Alert,
+  Image,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, borderRadius, shadows } from '../../theme';
 import { documentService } from '../../services/api/documentService';
 import { DocumentItem } from '../../types';
@@ -17,94 +20,107 @@ import { SearchIcon } from '../../assets/icons';
 
 const TABS = ['All', 'PDF', 'Images', 'Others'];
 
-export const DocumentsListScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
+export const DocumentsListScreen: React.FC<{ navigation: any; route?: any }> = ({ navigation, route }) => {
   const [activeTab, setActiveTab] = useState('All');
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(route?.params?.category || null);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
   const [isGridView, setIsGridView] = useState(true);
 
-  const fetchDocs = async () => {
+  useEffect(() => {
+    if (route?.params?.category) {
+      setSelectedCategory(route?.params?.category);
+    }
+  }, [route?.params?.category]);
+
+  const fetchDocs = useCallback(async () => {
+    let localDocs: DocumentItem[] = [];
+    try {
+      const cached = await AsyncStorage.getItem('@fic_locker_offline_docs');
+      if (cached) {
+        localDocs = JSON.parse(cached);
+      }
+    } catch {
+      // ignore
+    }
+
+    let serverDocs: DocumentItem[] = [];
     try {
       const res = await documentService.getDocuments({
         search: search.trim() || undefined,
         fileType: activeTab === 'PDF' ? 'pdf' : activeTab === 'Images' ? 'jpg' : undefined,
       });
-      if (res.documents?.length) {
-        setDocuments(res.documents);
-      } else {
-        // Fallback realistic user docs matching UI reference
-        setDocuments([
-          {
-            _id: '1',
-            userId: '1',
-            name: 'Resume.pdf',
-            originalFileName: 'Resume.pdf',
-            fileType: 'pdf',
-            mimeType: 'application/pdf',
-            fileSizeBytes: 2516582,
-            storageKey: 'docs/resume.pdf',
-            category: 'Personal Documents',
-            tags: ['work', 'cv'],
-            status: 'available',
-            createdAt: '2026-11-01T10:00:00Z',
-            updatedAt: '2026-11-01T10:00:00Z',
-          },
-          {
-            _id: '2',
-            userId: '1',
-            name: 'ID Card.jpg',
-            originalFileName: 'ID Card.jpg',
-            fileType: 'jpg',
-            mimeType: 'image/jpeg',
-            fileSizeBytes: 1153433,
-            storageKey: 'docs/id.jpg',
-            category: 'Identity Proof',
-            tags: ['gov', 'id'],
-            status: 'available',
-            createdAt: '2026-11-03T11:00:00Z',
-            updatedAt: '2026-11-03T11:00:00Z',
-          },
-          {
-            _id: '3',
-            userId: '1',
-            name: 'Notes.pdf',
-            originalFileName: 'Notes.pdf',
-            fileType: 'pdf',
-            mimeType: 'application/pdf',
-            fileSizeBytes: 876544,
-            storageKey: 'docs/notes.pdf',
-            category: 'Education Documents',
-            tags: ['college', 'notes'],
-            status: 'available',
-            createdAt: '2026-11-05T14:30:00Z',
-            updatedAt: '2026-11-05T14:30:00Z',
-          },
-          {
-            _id: '4',
-            userId: '1',
-            name: 'Medical.jpg',
-            originalFileName: 'Medical.jpg',
-            fileType: 'jpg',
-            mimeType: 'image/jpeg',
-            fileSizeBytes: 1363148,
-            storageKey: 'docs/medical.jpg',
-            category: 'Medical Documents',
-            tags: ['health', 'prescription'],
-            status: 'available',
-            createdAt: '2026-11-07T09:20:00Z',
-            updatedAt: '2026-11-07T09:20:00Z',
-          },
-        ]);
+      if (res && Array.isArray(res.documents)) {
+        serverDocs = res.documents;
       }
     } catch (e) {
-      // Ignore
+      console.warn('[DocumentsListScreen] Failed to fetch server docs:', e);
     }
-  };
+
+    // Merge server docs and local offline docs (deduplicate by _id or name)
+    const combinedMap = new Map<string, DocumentItem>();
+    serverDocs.forEach((d) => combinedMap.set(d._id, d));
+    localDocs.forEach((d) => {
+      if (!combinedMap.has(d._id)) {
+        combinedMap.set(d._id, d);
+      }
+    });
+
+    let merged = Array.from(combinedMap.values());
+
+    // If active tab filter applies
+    if (activeTab === 'PDF') {
+      merged = merged.filter((d) => d.fileType === 'pdf' || d.name.toLowerCase().endsWith('.pdf'));
+    } else if (activeTab === 'Images') {
+      merged = merged.filter(
+        (d) =>
+          d.fileType === 'jpg' ||
+          d.fileType === 'png' ||
+          d.fileType === 'jpeg' ||
+          d.name.toLowerCase().endsWith('.jpg') ||
+          d.name.toLowerCase().endsWith('.png') ||
+          d.name.toLowerCase().endsWith('.jpeg')
+      );
+    } else if (activeTab === 'Others') {
+      merged = merged.filter(
+        (d) =>
+          d.fileType !== 'pdf' &&
+          d.fileType !== 'jpg' &&
+          d.fileType !== 'png' &&
+          d.fileType !== 'jpeg'
+      );
+    }
+
+    // Filter by search query if typed
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      merged = merged.filter(
+        (d) =>
+          d.name.toLowerCase().includes(q) ||
+          d.category?.toLowerCase().includes(q) ||
+          (d.tags || []).some((t) => t.toLowerCase().includes(q))
+      );
+    }
+
+    // Filter by selected category if navigated from Categories tab
+    if (selectedCategory) {
+      const catLower = selectedCategory.trim().toLowerCase();
+      merged = merged.filter((d) => (d.category || '').trim().toLowerCase() === catLower);
+    }
+
+    setDocuments(merged);
+  }, [activeTab, search, selectedCategory]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchDocs();
+    }, [fetchDocs])
+  );
 
   useEffect(() => {
     fetchDocs();
-  }, [activeTab, search]);
+  }, [fetchDocs]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -114,16 +130,21 @@ export const DocumentsListScreen: React.FC<{ navigation: any }> = ({ navigation 
 
   const renderItem = ({ item }: { item: DocumentItem }) => {
     const isPdf = item.fileType === 'pdf';
+    const thumbUri = item.localUri || item.thumbnailUrl;
     return (
       <TouchableOpacity
         style={[styles.docCard, isGridView ? styles.gridCard : styles.listCard]}
         onPress={() => navigation.navigate('DocumentDetail', { document: item })}
         activeOpacity={0.8}
       >
-        <View style={[styles.cardThumb, { backgroundColor: isPdf ? '#FEE2E2' : '#DBEAFE' }]}>
-          <Text style={[styles.thumbText, { color: isPdf ? colors.pdfRed : colors.imageBlue }]}>
-            {item.fileType.toUpperCase()}
-          </Text>
+        <View style={[styles.cardThumb, { backgroundColor: isPdf ? '#FEE2E2' : '#DBEAFE', overflow: 'hidden' }]}>
+          {thumbUri ? (
+            <Image source={{ uri: thumbUri }} style={styles.thumbImage} resizeMode="cover" />
+          ) : (
+            <Text style={[styles.thumbText, { color: isPdf ? colors.pdfRed : colors.imageBlue }]}>
+              {item.fileType.toUpperCase()}
+            </Text>
+          )}
         </View>
 
         <View style={styles.cardInfo}>
@@ -169,6 +190,24 @@ export const DocumentsListScreen: React.FC<{ navigation: any }> = ({ navigation 
         })}
       </View>
 
+      {/* Active Category Filter Banner */}
+      {selectedCategory && (
+        <View style={styles.categoryFilterBanner}>
+          <Text style={styles.categoryFilterText}>
+            Showing: <Text style={styles.categoryFilterHighlight}>{selectedCategory}</Text>
+          </Text>
+          <TouchableOpacity
+            style={styles.clearCategoryBtn}
+            onPress={() => {
+              setSelectedCategory(null);
+              navigation.setParams({ category: undefined });
+            }}
+          >
+            <Text style={styles.clearCategoryBtnText}>✕ Show All</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Documents Grid / List */}
       <FlatList
         key={isGridView ? 'grid_2' : 'list_1'}
@@ -176,8 +215,24 @@ export const DocumentsListScreen: React.FC<{ navigation: any }> = ({ navigation 
         data={documents}
         keyExtractor={(item) => item._id}
         renderItem={renderItem}
-        contentContainerStyle={styles.listContainer}
+        contentContainerStyle={[styles.listContainer, documents.length === 0 && styles.listContainerEmpty]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyIcon}>📄</Text>
+            <Text style={styles.emptyTitle}>No Documents Yet</Text>
+            <Text style={styles.emptySubtitle}>
+              You haven't added any documents in this view. Tap below to scan or upload a document.
+            </Text>
+            <TouchableOpacity
+              style={styles.emptyBtn}
+              onPress={() => navigation.navigate('UploadDocument')}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.emptyBtnText}>+ Upload Document</Text>
+            </TouchableOpacity>
+          </View>
+        }
       />
     </View>
   );
@@ -214,7 +269,39 @@ const styles = StyleSheet.create({
   tabsContainer: {
     flexDirection: 'row',
     paddingHorizontal: 20,
-    marginBottom: 16,
+    marginBottom: 12,
+  },
+  categoryFilterBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#EEF2FF',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  categoryFilterText: {
+    fontSize: typography.fontSizes.sm,
+    color: '#3730A3',
+  },
+  categoryFilterHighlight: {
+    fontWeight: typography.fontWeights.bold,
+    color: colors.primary,
+  },
+  clearCategoryBtn: {
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    backgroundColor: '#FFFFFF',
+    borderRadius: borderRadius.sm,
+  },
+  clearCategoryBtnText: {
+    fontSize: typography.fontSizes.xs,
+    color: colors.primary,
+    fontWeight: typography.fontWeights.bold,
   },
   tabBtn: {
     paddingHorizontal: 16,
@@ -263,6 +350,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 8,
   },
+  thumbImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 12,
+  },
   thumbText: {
     fontSize: 14,
     fontWeight: 'bold',
@@ -280,6 +372,44 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.textMuted,
     marginTop: 4,
+  },
+  listContainerEmpty: {
+    flexGrow: 1,
+    justifyContent: 'center',
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 24,
+  },
+  emptyIcon: {
+    fontSize: 52,
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: colors.text,
+    marginBottom: 8,
+  },
+  emptySubtitle: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 19,
+    marginBottom: 24,
+  },
+  emptyBtn: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+    borderRadius: borderRadius.pill,
+  },
+  emptyBtnText: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+    fontSize: 14,
   },
 });
 

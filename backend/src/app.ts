@@ -19,6 +19,9 @@ import adminReportsRoutes from './modules/reports/adminReports.routes';
 import adminAuditLogsRoutes from './modules/audit-logs/adminAuditLogs.routes';
 import adminSettingsRoutes from './modules/settings/adminSettings.routes';
 import adminEventsRoutes from './modules/events/adminEvents.routes';
+import { Plan } from './models/PlanAndSubscription';
+import { userDocumentsRouter } from './modules/documents/userDocuments.routes';
+import { userSharedRouter } from './modules/userShared.routes';
 
 export function createApp() {
   const app = express();
@@ -26,7 +29,7 @@ export function createApp() {
   app.use(helmet());
   app.use(
     cors({
-      origin: env.corsOrigins,
+      origin: true,
       credentials: true,
     })
   );
@@ -45,6 +48,45 @@ export function createApp() {
   app.get('/health', (_req, res) => {
     res.json({ success: true, status: 'ok', service: 'fic-locker-shared-backend' });
   });
+
+  // Public / User App Subscriptions & Plans (wired for both /subscriptions/plans and /plans)
+  const getPublicPlansHandler = async (_req: express.Request, res: express.Response) => {
+    try {
+      const plans = await Plan.find({ isActive: { $ne: false } }).sort({ monthlyPriceInr: 1 }).lean();
+      const formatted = plans.map((p) => ({
+        _id: p._id.toString(),
+        id: p._id.toString(),
+        name: p.name,
+        code: p.code,
+        description: p.description,
+        priceMonthly: p.monthlyPriceInr,
+        priceAnnually: p.annualPriceInr,
+        monthlyPriceInr: p.monthlyPriceInr,
+        annualPriceInr: p.annualPriceInr,
+        currency: 'INR',
+        storageQuotaBytes: p.storageLimitBytes,
+        storageLimitBytes: p.storageLimitBytes,
+        maxFileSizeBytes: p.maxFileSizeBytes,
+        documentLimit: p.documentLimit,
+        features: p.features || [],
+        isPopular: p.code === 'plus' || p.code === 'pro' || p.name.toLowerCase().includes('plus'),
+      }));
+      return res.json({ success: true, data: { plans: formatted }, plans: formatted });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err?.message || 'Failed to fetch plans' });
+    }
+  };
+
+  app.get(`${env.apiPrefix}/subscriptions/plans`, getPublicPlansHandler);
+  app.get(`${env.apiPrefix}/plans`, getPublicPlansHandler);
+
+  app.get(`${env.apiPrefix}/subscriptions/current`, async (_req, res) => {
+    return res.json({ success: true, subscription: null });
+  });
+
+  // User Document & App Routes (/api/v1/documents/*, /api/v1/categories, /api/v1/storage/info)
+  app.use(`${env.apiPrefix}/documents`, userDocumentsRouter);
+  app.use(env.apiPrefix, userSharedRouter);
 
   // Shared payment webhook endpoint (used by Razorpay)
   app.use(`${env.apiPrefix}/payments`, paymentWebhookRoutes);

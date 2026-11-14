@@ -9,6 +9,7 @@ import type {
   DashboardPayload,
   NotificationBroadcastRecord,
   PaymentRecord,
+  PlanRecord,
   StorageOverview,
   SubscriptionRecord,
   SupportTicketRecord,
@@ -114,6 +115,21 @@ export const adminMobileApi = {
     storage: async () => {
       const res = await mobileApiClient.get<ApiResponse<StorageOverview>>('/admin/storage');
       return res.data.data;
+    },
+  },
+
+  plans: {
+    list: async () => {
+      const res = await mobileApiClient.get<ApiResponse<PlanRecord[]>>('/admin/plans');
+      return res.data.data;
+    },
+    toggleStatus: async (planId: string, isActive: boolean) => {
+      const res = await mobileApiClient.patch<ApiResponse<PlanRecord>>(`/admin/plans/${planId}/status`, { isActive });
+      return res.data.data;
+    },
+    delete: async (planId: string) => {
+      const res = await mobileApiClient.delete<ApiResponse<{ deleted: boolean; _id: string }>>(`/admin/plans/${planId}`);
+      return res.data;
     },
   },
 

@@ -51,7 +51,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
         <View style={styles.header}>
           <View style={styles.iconContainer}>
             <Image
-              source={require('../../assets/images/scanner_hero.jpg')}
+              source={require('../../assets/images/scanner_hero.png')}
               style={styles.logoBadge}
               resizeMode="contain"
             />

@@ -12,6 +12,8 @@
     "dev:backend": "npm --workspace=backend run dev",
     "dev:web": "npm --workspace=Admin run dev",
     "start:mobile": "npm --prefix Admin_Mobile start",
+    "start:user": "npm --prefix user start",
+    "android:user": "npm --prefix user run android",
     "build:types": "npm --workspace=packages/shared-types run build",
     "build:backend": "npm --workspace=backend run build",
     "build:web": "npm --workspace=Admin run build",

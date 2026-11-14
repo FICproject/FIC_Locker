@@ -1,5 +1,6 @@
+import axios from 'axios';
 import { apiClient } from './client';
-import { API_CONFIG } from '../../constants';
+import { API_CONFIG, resolveDevHost, setApiHostOverride } from '../../constants';
 import {
   DocumentItem,
   UploadAuthorisationResponse,
@@ -163,20 +164,57 @@ export const reminderService = {
 
 export const subscriptionService = {
   async getPlans(): Promise<SubscriptionPlan[]> {
-    const res = await apiClient.get<{ plans: SubscriptionPlan[] }>(API_CONFIG.ENDPOINTS.PLANS);
-    return res.data.plans;
+    try {
+      const res = await apiClient.get<any>(API_CONFIG.ENDPOINTS.PLANS);
+      const raw = res.data?.data?.plans ?? res.data?.plans ?? res.data?.data ?? res.data ?? [];
+      if (Array.isArray(raw) && raw.length > 0) {
+        return raw;
+      }
+    } catch (err) {
+      console.warn('[subscriptionService] Primary getPlans via apiClient failed:', err);
+    }
+
+    // Fallback host scan for Android physical device / WiFi LAN / emulator / USB adb
+    const candidateHosts = [
+      resolveDevHost(),
+      '192.168.0.139',
+      '10.0.2.2',
+      'localhost',
+      '127.0.0.1',
+    ].filter((h, i, arr) => h && arr.indexOf(h) === i);
+
+    for (const host of candidateHosts) {
+      for (const endpoint of ['/subscriptions/plans', '/plans']) {
+        try {
+          const url = `http://${host}:5000/api/v1${endpoint}`;
+          const res = await axios.get(url, { timeout: 3500 });
+          const raw = res.data?.data?.plans ?? res.data?.plans ?? res.data?.data ?? res.data ?? [];
+          if (Array.isArray(raw) && raw.length > 0) {
+            setApiHostOverride(host);
+            return raw;
+          }
+        } catch {
+          // Continue searching candidates
+        }
+      }
+    }
+    return [];
   },
 
   async getCurrentSubscription(): Promise<UserSubscription | null> {
-    const res = await apiClient.get<{ subscription: UserSubscription | null }>(
-      API_CONFIG.ENDPOINTS.SUBSCRIPTION_CURRENT
-    );
-    return res.data.subscription;
+    try {
+      const res = await apiClient.get<{ subscription: UserSubscription | null }>(
+        API_CONFIG.ENDPOINTS.SUBSCRIPTION_CURRENT
+      );
+      return res.data?.subscription ?? null;
+    } catch {
+      return null;
+    }
   },
 
   async upgradePlan(planId: string, billingCycle: 'monthly' | 'annual'): Promise<{ success: boolean; redirectUrl?: string }> {
     const res = await apiClient.post(API_CONFIG.ENDPOINTS.SUBSCRIPTION_UPGRADE, { planId, billingCycle });
-    return res.data;
+    return res.data as { success: boolean; redirectUrl?: string };
   },
 };
 

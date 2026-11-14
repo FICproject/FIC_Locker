@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Edit3, Plus, Power } from 'lucide-react';
+import { Edit3, Plus, Power, Trash2 } from 'lucide-react';
 import type { PlanRecord, SubscriptionSummary } from '@docscanner/shared-types';
 import { adminApi } from '../../services/adminApi';
 import { extractErrorMessage } from '../../lib/apiClient';
@@ -167,6 +167,21 @@ export function SubscriptionsPage() {
     }
   };
 
+  const handleDeletePlan = async (plan: PlanRecord) => {
+    const confirmed = window.confirm(
+      `Are you sure you want to permanently delete the "${plan.name}" plan?\n\nThis will remove the plan from both the Admin Website and Admin Mobile App.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await adminApi.plans.delete(plan._id);
+      setSuccess(`Plan "${plan.name}" deleted successfully.`);
+      await loadPlans();
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    }
+  };
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -242,10 +257,17 @@ export function SubscriptionsPage() {
                   <button
                     onClick={() => handleTogglePlan(p)}
                     className={`flex-1 inline-flex items-center justify-center gap-1.5 py-2 text-xs font-semibold rounded-lg cursor-pointer ${
-                      p.isActive ? 'bg-rose-50 text-rose-700 hover:bg-rose-100' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                      p.isActive ? 'bg-amber-50 text-amber-700 hover:bg-amber-100' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
                     }`}
                   >
                     <Power className="w-3.5 h-3.5" /> {p.isActive ? 'Deactivate' : 'Activate'}
+                  </button>
+                  <button
+                    onClick={() => handleDeletePlan(p)}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 text-xs font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-lg cursor-pointer"
+                    title={`Delete ${p.name}`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Delete
                   </button>
                 </div>
               </div>

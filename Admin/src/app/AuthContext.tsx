@@ -28,8 +28,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const profile = await adminApi.auth.me();
       setAdmin(profile);
     } catch {
-      tokenStorage.clear();
-      setAdmin(null);
+      // If session is truly expired, apiClient response interceptor emits 'admin:session-expired'
+      if (!tokenStorage.getAccessToken()) {
+        setAdmin(null);
+      }
     } finally {
       setIsLoading(false);
     }

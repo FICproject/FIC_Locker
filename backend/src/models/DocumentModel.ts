@@ -21,6 +21,9 @@ export interface IStoredDocument extends Document {
   status: 'draft' | 'upload_pending' | 'uploading' | 'verifying' | 'available' | 'failed' | 'deleted';
   failureReason?: string;
   operationalNotes?: string;
+  notes?: string;
+  isFavourite?: boolean;
+  isArchived?: boolean;
   expiryDate?: Date | null;
   deletedAt?: Date | null;
   createdAt: Date;
@@ -57,6 +60,9 @@ const StoredDocumentSchema = new Schema<IStoredDocument>(
     },
     failureReason: { type: String },
     operationalNotes: { type: String },
+    notes: { type: String },
+    isFavourite: { type: Boolean, default: false },
+    isArchived: { type: Boolean, default: false },
     expiryDate: { type: Date, default: null },
     deletedAt: { type: Date, default: null },
   },

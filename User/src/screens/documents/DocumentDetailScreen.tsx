@@ -1,38 +1,69 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   Alert,
-  ScrollView,
+  Image,
+  Dimensions,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, borderRadius, shadows } from '../../theme';
 import { DocumentItem } from '../../types';
 import { formatBytes, formatDate } from '../../utils/formatters';
 import { documentService } from '../../services/api/documentService';
 
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
 export const DocumentDetailScreen: React.FC<{ navigation: any; route: any }> = ({
   navigation,
   route,
 }) => {
-  const [doc, setDoc] = useState<DocumentItem>(
-    route.params?.document || {
-      _id: 'doc_1',
-      name: 'Project Report.pdf',
-      originalFileName: 'Project Report.pdf',
-      fileType: 'pdf',
-      fileSizeBytes: 2457600,
-      category: 'Education Documents',
-      tags: ['report', 'analytics'],
-      notes: 'Final semester report submission',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }
-  );
+  const initialDoc: DocumentItem = route.params?.document || {
+    _id: 'doc_1',
+    name: 'Document.jpg',
+    originalFileName: 'Document.jpg',
+    fileType: 'jpg',
+    fileSizeBytes: 1572864,
+    category: 'Personal Documents',
+    tags: ['scan'],
+    notes: '',
+    pageCount: 1,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
 
+  const [doc, setDoc] = useState<DocumentItem>(initialDoc);
   const [currentPage, setCurrentPage] = useState(1);
-  const totalPages = 5;
+
+  // If localUri was not in route params, look up matching document in local cache
+  useEffect(() => {
+    (async () => {
+      if (!doc.localUri && !doc.thumbnailUrl) {
+        try {
+          const cached = await AsyncStorage.getItem('@fic_locker_offline_docs');
+          if (cached) {
+            const list: DocumentItem[] = JSON.parse(cached);
+            const found = list.find((d) => d._id === doc._id || d.name === doc.name);
+            if (found && (found.localUri || found.thumbnailUrl)) {
+              setDoc((prev) => ({
+                ...prev,
+                localUri: found.localUri || found.thumbnailUrl,
+                thumbnailUrl: found.thumbnailUrl || found.localUri,
+                pageCount: found.pageCount || 1,
+              }));
+            }
+          }
+        } catch {
+          // ignore cache read error
+        }
+      }
+    })();
+  }, [doc._id, doc.name]);
+
+  const totalPages = Math.max(1, doc.pageCount || 1);
+  const imageUri = doc.localUri || doc.thumbnailUrl || doc.downloadUrl;
 
   const handleDownload = async () => {
     try {
@@ -54,10 +85,39 @@ export const DocumentDetailScreen: React.FC<{ navigation: any; route: any }> = (
           try {
             await documentService.deleteDocument(doc._id);
           } catch (e) {}
+
+          // Remove from local cache as well
+          try {
+            const cached = await AsyncStorage.getItem('@fic_locker_offline_docs');
+            if (cached) {
+              const list: DocumentItem[] = JSON.parse(cached);
+              const updated = list.filter((d) => d._id !== doc._id && d.name !== doc.name);
+              await AsyncStorage.setItem('@fic_locker_offline_docs', JSON.stringify(updated));
+            }
+          } catch {}
+
           navigation.goBack();
         },
       },
     ]);
+  };
+
+  const handleRename = () => {
+    Alert.prompt?.('Rename Document', 'Enter new title:', async (newName) => {
+      if (!newName || !newName.trim()) return;
+      const cleanName = newName.trim();
+      setDoc((prev) => ({ ...prev, name: cleanName }));
+
+      // Update in local cache
+      try {
+        const cached = await AsyncStorage.getItem('@fic_locker_offline_docs');
+        if (cached) {
+          const list: DocumentItem[] = JSON.parse(cached);
+          const updated = list.map((d) => (d._id === doc._id ? { ...d, name: cleanName } : d));
+          await AsyncStorage.setItem('@fic_locker_offline_docs', JSON.stringify(updated));
+        }
+      } catch {}
+    });
   };
 
   return (
@@ -81,31 +141,46 @@ export const DocumentDetailScreen: React.FC<{ navigation: any; route: any }> = (
         </View>
       </View>
 
-      {/* Document Document Viewer Body */}
+      {/* Document Viewer Body */}
       <View style={styles.viewerContainer}>
         <View style={styles.pageCard}>
-          <Text style={styles.pageTitle}>{doc.name.replace(/\.[^/.]+$/, '')}</Text>
+          <Text style={styles.pageTitle} numberOfLines={1}>
+            {doc.name.replace(/\.[^/.]+$/, '')}
+          </Text>
 
-          {/* Graphical Mock Content resembling UI Screenshot */}
-          <View style={styles.mockChartContainer}>
-            <View style={styles.chartBarGroup}>
-              <View style={[styles.bar, { height: 40, backgroundColor: '#DDD6FE' }]} />
-              <View style={[styles.bar, { height: 60, backgroundColor: '#C4B5FD' }]} />
-              <View style={[styles.bar, { height: 80, backgroundColor: '#A78BFA' }]} />
-              <View style={[styles.bar, { height: 110, backgroundColor: '#8B5CF6' }]} />
-              <View style={[styles.bar, { height: 140, backgroundColor: colors.primary }]} />
+          {imageUri ? (
+            <View style={styles.imageWrapper}>
+              <Image
+                source={{ uri: imageUri }}
+                style={styles.realPhoto}
+                resizeMode="contain"
+              />
             </View>
-
-            <View style={styles.pieMock}>
-              <View style={styles.pieInner} />
+          ) : doc.fileType === 'pdf' ? (
+            <View style={styles.pdfFallbackContainer}>
+              <View style={styles.pdfBadge}>
+                <Text style={styles.pdfBadgeText}>PDF DOCUMENT</Text>
+              </View>
+              <Text style={styles.pdfFileName} numberOfLines={2}>{doc.name}</Text>
+              <Text style={styles.pdfMeta}>{formatBytes(doc.fileSizeBytes)}</Text>
+              <View style={styles.mockTextLines}>
+                <View style={styles.mockLine} />
+                <View style={[styles.mockLine, { width: '85%' }]} />
+                <View style={[styles.mockLine, { width: '90%' }]} />
+                <View style={[styles.mockLine, { width: '70%' }]} />
+              </View>
             </View>
-          </View>
+          ) : (
+            <View style={styles.noPhotoContainer}>
+              <Text style={styles.noPhotoIcon}>📷</Text>
+              <Text style={styles.noPhotoTitle}>{doc.name}</Text>
+              <Text style={styles.noPhotoMeta}>{formatBytes(doc.fileSizeBytes)} • {formatDate(doc.createdAt)}</Text>
+            </View>
+          )}
 
-          <View style={styles.mockTextLines}>
-            <View style={styles.mockLine} />
-            <View style={[styles.mockLine, { width: '85%' }]} />
-            <View style={[styles.mockLine, { width: '90%' }]} />
-            <View style={[styles.mockLine, { width: '70%' }]} />
+          <View style={styles.cardFooter}>
+            <Text style={styles.cardFooterCategory}>{doc.category || 'Personal Documents'}</Text>
+            <Text style={styles.cardFooterDate}>{formatDate(doc.createdAt)}</Text>
           </View>
         </View>
       </View>
@@ -114,9 +189,10 @@ export const DocumentDetailScreen: React.FC<{ navigation: any; route: any }> = (
       <View style={styles.bottomBar}>
         <TouchableOpacity
           onPress={() => setCurrentPage((p) => Math.max(1, p - 1))}
-          style={styles.pageBtn}
+          style={[styles.pageBtn, (currentPage <= 1 || totalPages <= 1) && styles.pageBtnDisabled]}
+          disabled={currentPage <= 1 || totalPages <= 1}
         >
-          <Text style={styles.pageBtnText}>◀</Text>
+          <Text style={[styles.pageBtnText, (currentPage <= 1 || totalPages <= 1) && styles.pageBtnTextDisabled]}>◀</Text>
         </TouchableOpacity>
 
         <Text style={styles.pageIndicator}>
@@ -125,22 +201,16 @@ export const DocumentDetailScreen: React.FC<{ navigation: any; route: any }> = (
 
         <TouchableOpacity
           onPress={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-          style={styles.pageBtn}
+          style={[styles.pageBtn, (currentPage >= totalPages || totalPages <= 1) && styles.pageBtnDisabled]}
+          disabled={currentPage >= totalPages || totalPages <= 1}
         >
-          <Text style={styles.pageBtnText}>▶</Text>
+          <Text style={[styles.pageBtnText, (currentPage >= totalPages || totalPages <= 1) && styles.pageBtnTextDisabled]}>▶</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Quick Action Strip (Rename, Edit Metadata, Delete) */}
+      {/* Quick Action Strip (Rename, Delete) */}
       <View style={styles.metaActions}>
-        <TouchableOpacity
-          style={styles.metaActionBtn}
-          onPress={() =>
-            Alert.prompt?.('Rename Document', 'Enter new title:', (newName) => {
-              if (newName) setDoc({ ...doc, name: newName });
-            })
-          }
-        >
+        <TouchableOpacity style={styles.metaActionBtn} onPress={handleRename}>
           <Text style={styles.metaActionText}>✏️ Rename</Text>
         </TouchableOpacity>
 
@@ -183,7 +253,7 @@ const styles = StyleSheet.create({
   },
   viewerContainer: {
     flex: 1,
-    padding: 20,
+    padding: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -191,56 +261,108 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '92%',
     backgroundColor: '#FFFFFF',
-    borderRadius: borderRadius.lg,
-    padding: 24,
+    borderRadius: borderRadius.xl,
+    padding: 18,
+    alignItems: 'center',
     ...shadows.card,
   },
   pageTitle: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: typography.fontWeights.bold,
     color: colors.text,
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: 12,
   },
-  mockChartContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-end',
-    marginVertical: 24,
-    paddingHorizontal: 12,
-  },
-  chartBarGroup: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    height: 150,
-  },
-  bar: {
-    width: 22,
-    borderRadius: 6,
-    marginRight: 8,
-  },
-  pieMock: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    backgroundColor: colors.primary,
+  imageWrapper: {
+    flex: 1,
+    width: '100%',
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#F8FAFC',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  pieInner: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#FFFFFF',
+  realPhoto: {
+    width: '100%',
+    height: '100%',
+  },
+  pdfFallbackContainer: {
+    flex: 1,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  pdfBadge: {
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  pdfBadgeText: {
+    color: '#EF4444',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  pdfFileName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  pdfMeta: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginBottom: 20,
   },
   mockTextLines: {
-    marginTop: 20,
+    width: '100%',
+    marginTop: 10,
   },
   mockLine: {
-    height: 10,
-    backgroundColor: '#F3F4F6',
-    borderRadius: 5,
+    height: 8,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 4,
     marginBottom: 10,
+  },
+  noPhotoContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noPhotoIcon: {
+    fontSize: 56,
+    marginBottom: 12,
+  },
+  noPhotoTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: colors.text,
+    marginBottom: 4,
+  },
+  noPhotoMeta: {
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  cardFooterCategory: {
+    fontSize: 12,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  cardFooterDate: {
+    fontSize: 12,
+    color: colors.textMuted,
   },
   bottomBar: {
     flexDirection: 'row',
@@ -253,9 +375,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 6,
   },
+  pageBtnDisabled: {
+    opacity: 0.3,
+  },
   pageBtnText: {
     color: '#FFFFFF',
     fontSize: 16,
+  },
+  pageBtnTextDisabled: {
+    color: '#6B7280',
   },
   pageIndicator: {
     color: '#FFFFFF',
@@ -266,7 +394,7 @@ const styles = StyleSheet.create({
   metaActions: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    paddingVertical: 12,
+    paddingVertical: 14,
     backgroundColor: '#141324',
     borderTopWidth: 1,
     borderTopColor: '#282542',
@@ -280,4 +408,3 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
-

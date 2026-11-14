@@ -30,7 +30,21 @@ export type DocumentCategoryType =
   | 'Education Documents'
   | 'Financial Documents'
   | 'Medical Documents'
-  | 'Other Documents';
+  | 'Other Documents'
+  | string;
+
+export interface CategoryItem {
+  id: string;
+  _id?: string;
+  name: string;
+  slug?: string;
+  description?: string;
+  icon?: string;
+  color?: string;
+  isSystemDefault?: boolean;
+  isActive?: boolean;
+  documentCount?: number;
+}
 
 export interface DocumentItem {
   _id: string;
@@ -52,6 +66,7 @@ export interface DocumentItem {
   status: 'pending' | 'uploading' | 'verifying' | 'available' | 'failed';
   pageCount?: number;
   thumbnailUrl?: string;
+  localUri?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -91,11 +106,17 @@ export interface ExpiryReminder {
 export interface SubscriptionPlan {
   _id: string;
   name: string;
-  code: 'free' | 'pro' | 'enterprise';
-  priceMonthly: number;
-  priceAnnually: number;
-  currency: string;
-  storageQuotaBytes: number;
+  code: string;
+  description?: string;
+  priceMonthly?: number;
+  priceAnnually?: number;
+  monthlyPriceInr?: number;
+  annualPriceInr?: number;
+  currency?: string;
+  storageQuotaBytes?: number;
+  storageLimitBytes?: number;
+  maxFileSizeBytes?: number;
+  documentLimit?: number | null;
   features: string[];
   isPopular?: boolean;
 }

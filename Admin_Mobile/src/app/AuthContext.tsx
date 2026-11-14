@@ -31,8 +31,10 @@ export function MobileAuthProvider({ children }: { children: React.ReactNode }) 
         const profile = await adminMobileApi.auth.me();
         setAdmin(profile);
       } catch {
-        await mobileTokenStorage.clear();
-        setAdmin(null);
+        const remainingToken = await mobileTokenStorage.getAccessToken();
+        if (!remainingToken) {
+          setAdmin(null);
+        }
       } finally {
         setLoading(false);
       }

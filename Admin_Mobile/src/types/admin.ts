@@ -194,3 +194,19 @@ export interface AuditLogRecord {
   summary: string;
   createdAt: string;
 }
+
+export interface PlanRecord {
+  _id: string;
+  name: string;
+  code: string;
+  description?: string;
+  monthlyPriceInr: number;
+  annualPriceInr: number;
+  storageLimitBytes: number;
+  maxFileSizeBytes: number;
+  documentLimit: number | null;
+  features: string[];
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}

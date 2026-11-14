@@ -130,6 +130,48 @@ plansRouter.patch(
   })
 );
 
+plansRouter.delete(
+  '/:planId',
+  asyncHandler(async (req, res) => {
+    const admin = req.admin!;
+    const sourceApp = resolveSourceApp(req);
+    const { planId } = req.params;
+
+    const plan = await Plan.findById(planId);
+    if (!plan) {
+      throw new HttpError(404, 'Subscription plan not found.');
+    }
+
+    const activeSubCount = await Subscription.countDocuments({
+      planId,
+      status: { $in: ['active', 'trialing'] },
+    });
+    if (activeSubCount > 0) {
+      throw new HttpError(
+        400,
+        `Cannot delete plan "${plan.name}" because it has ${activeSubCount} active subscriber(s). Please deactivate the plan instead.`
+      );
+    }
+
+    await Plan.findByIdAndDelete(planId);
+
+    await recordAuditLog({
+      actorId: admin.id,
+      actorEmail: admin.email,
+      sourceApp,
+      action: 'PLAN_DELETED',
+      entityType: 'plan',
+      entityId: plan._id.toString(),
+      summary: `Deleted subscription plan "${plan.name}"`,
+      metadata: { code: plan.code, monthlyPriceInr: plan.monthlyPriceInr },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+    });
+
+    return sendSuccess(res, { deleted: true, _id: planId }, `Plan "${plan.name}" deleted.`);
+  })
+);
+
 subscriptionsRouter.get(
   '/',
   asyncHandler(async (req, res) => {

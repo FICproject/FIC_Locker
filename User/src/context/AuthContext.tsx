@@ -27,10 +27,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
           const profile = await authService.getCurrentUser();
           setUser(profile);
-          await AsyncStorage.setItem('@docuscan_user_profile', JSON.stringify(profile));
+          await AsyncStorage.setItem('@fic_locker_user_profile', JSON.stringify(profile));
         } catch (fetchErr) {
           // If offline or endpoint not yet loaded, check cached profile
-          const cached = await AsyncStorage.getItem('@docuscan_user_profile');
+          const cached = await AsyncStorage.getItem('@fic_locker_user_profile');
           if (cached) {
             setUser(JSON.parse(cached));
           } else {
@@ -64,7 +64,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const res = await authService.login({ email, password: pass });
       setUser(res.user);
-      await AsyncStorage.setItem('@docuscan_user_profile', JSON.stringify(res.user));
+      await AsyncStorage.setItem('@fic_locker_user_profile', JSON.stringify(res.user));
     } catch (err: any) {
       // In development or if backend route is pending, allow smooth demo login matching user mockup
       const mockUser: UserProfile = {
@@ -79,7 +79,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updatedAt: new Date().toISOString(),
       };
       setUser(mockUser);
-      await AsyncStorage.setItem('@docuscan_user_profile', JSON.stringify(mockUser));
+      await AsyncStorage.setItem('@fic_locker_user_profile', JSON.stringify(mockUser));
     }
   };
 
@@ -87,7 +87,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const res = await authService.register({ name, email, password: pass, phone });
       setUser(res.user);
-      await AsyncStorage.setItem('@docuscan_user_profile', JSON.stringify(res.user));
+      await AsyncStorage.setItem('@fic_locker_user_profile', JSON.stringify(res.user));
     } catch (err) {
       const mockUser: UserProfile = {
         _id: 'usr_mock_' + Date.now(),
@@ -102,7 +102,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updatedAt: new Date().toISOString(),
       };
       setUser(mockUser);
-      await AsyncStorage.setItem('@docuscan_user_profile', JSON.stringify(mockUser));
+      await AsyncStorage.setItem('@fic_locker_user_profile', JSON.stringify(mockUser));
     }
   };
 

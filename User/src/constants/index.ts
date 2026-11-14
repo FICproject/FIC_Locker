@@ -1,5 +1,34 @@
+import { NativeModules, Platform } from 'react-native';
+
+let overrideHost: string | null = null;
+
+export function setApiHostOverride(host: string) {
+  overrideHost = host;
+}
+
+export const DEV_CANDIDATE_HOSTS = [
+  '127.0.0.1',
+  'localhost',
+  '192.168.0.128',
+  '10.0.2.2',
+];
+
+export function resolveDevHost(): string {
+  if (overrideHost) return overrideHost;
+  const scriptURL: string | undefined = NativeModules?.SourceCode?.scriptURL;
+  if (scriptURL) {
+    const match = /^https?:\/\/([^/:]+)/i.exec(scriptURL);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+  return Platform.OS === 'android' ? '127.0.0.1' : 'localhost';
+}
+
 export const API_CONFIG = {
-  BASE_URL: 'http://localhost:5000/api/v1',
+  get BASE_URL() {
+    return `http://${resolveDevHost()}:5000/api/v1`;
+  },
   TIMEOUT: 15000,
   ENDPOINTS: {
     // Auth

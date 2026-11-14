@@ -10,17 +10,17 @@ export async function connectDatabase(uri: string = env.mongodbUri): Promise<typ
 
   if (env.useLocalEmbeddedDb && env.nodeEnv !== 'production') {
     const { MongoMemoryServer } = await import('mongodb-memory-server');
-    const dbPath = path.resolve(process.cwd(), '.local-mongo');
-    fs.mkdirSync(dbPath, { recursive: true });
+    const downloadDir = path.resolve(__dirname, '../../../node_modules/.cache/mongodb-memory-server');
     embeddedServer = await MongoMemoryServer.create({
       instance: {
-        dbPath,
-        storageEngine: 'wiredTiger',
         dbName: 'doc_scanner_saas',
+      },
+      binary: {
+        downloadDir,
       },
     });
     const localUri = (embeddedServer as unknown as { getUri: () => string }).getUri();
-    console.info(`[Database] Using persistent local embedded MongoDB at ${dbPath}`);
+    console.info(`[Database] Using local embedded MongoDB at ${localUri}`);
     return mongoose.connect(localUri);
   }
 

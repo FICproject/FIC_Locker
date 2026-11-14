@@ -44,7 +44,7 @@ const headerOptions = {
 
 function UsersNavigator() {
   return (
-    <UsersStack.Navigator screenOptions={headerOptions}>
+    <UsersStack.Navigator id="users-nav" screenOptions={headerOptions}>
       <UsersStack.Screen name="UsersList" component={UsersScreen} options={{ title: 'Users' }} />
       <UsersStack.Screen name="UserDetail" component={UserDetailScreen} options={{ title: 'User Details' }} />
     </UsersStack.Navigator>
@@ -53,7 +53,7 @@ function UsersNavigator() {
 
 function DocumentsNavigator() {
   return (
-    <DocumentsStack.Navigator screenOptions={headerOptions}>
+    <DocumentsStack.Navigator id="documents-nav" screenOptions={headerOptions}>
       <DocumentsStack.Screen name="DocumentsList" component={DocumentsScreen} options={{ title: 'Documents & Uploads' }} />
       <DocumentsStack.Screen name="DocumentDetail" component={DocumentDetailScreen} options={{ title: 'Document Details' }} />
     </DocumentsStack.Navigator>
@@ -62,7 +62,7 @@ function DocumentsNavigator() {
 
 function SupportNavigator() {
   return (
-    <SupportStack.Navigator screenOptions={headerOptions}>
+    <SupportStack.Navigator id="support-nav" screenOptions={headerOptions}>
       <SupportStack.Screen name="SupportList" component={SupportScreen} options={{ title: 'Support Tickets' }} />
       <SupportStack.Screen name="TicketDetail" component={TicketDetailScreen} options={{ title: 'Ticket Details' }} />
     </SupportStack.Navigator>
@@ -71,7 +71,7 @@ function SupportNavigator() {
 
 function MoreNavigator() {
   return (
-    <MoreStack.Navigator screenOptions={headerOptions}>
+    <MoreStack.Navigator id="more-nav" screenOptions={headerOptions}>
       <MoreStack.Screen name="MoreHub" component={MoreScreen} options={{ title: 'Operations & Audit' }} />
       <MoreStack.Screen
         name="SubscriptionsPayments"
@@ -99,13 +99,14 @@ export function RootNavigator() {
   return (
     <NavigationContainer>
       {!admin ? (
-        <AuthStack.Navigator screenOptions={headerOptions}>
+        <AuthStack.Navigator id="auth-nav" screenOptions={headerOptions}>
           <AuthStack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
           <AuthStack.Screen name="ForgotPassword" component={ForgotPasswordScreen} options={{ title: 'Forgot Password' }} />
           <AuthStack.Screen name="ResetPassword" component={ResetPasswordScreen} options={{ title: 'Reset Password' }} />
         </AuthStack.Navigator>
       ) : (
         <Tabs.Navigator
+          id="root-tab-nav"
           screenOptions={{
             tabBarActiveTintColor: '#1D63DC',
             tabBarInactiveTintColor: '#64748B',

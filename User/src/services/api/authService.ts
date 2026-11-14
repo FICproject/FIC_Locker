@@ -27,7 +27,7 @@ export const authService = {
   },
 
   async sendOtp(data: { identifier: string; type: 'email' | 'phone' }): Promise<{ message: string; otpSent: boolean }> {
-    const res = await apiClient.post(API_CONFIG.ENDPOINTS.AUTH_SEND_OTP, data);
+    const res = await apiClient.post<{ message: string; otpSent: boolean }>(API_CONFIG.ENDPOINTS.AUTH_SEND_OTP, data);
     return res.data;
   },
 
@@ -40,12 +40,12 @@ export const authService = {
   },
 
   async forgotPassword(data: { email: string }): Promise<{ message: string }> {
-    const res = await apiClient.post(API_CONFIG.ENDPOINTS.AUTH_FORGOT_PASSWORD, data);
+    const res = await apiClient.post<{ message: string }>(API_CONFIG.ENDPOINTS.AUTH_FORGOT_PASSWORD, data);
     return res.data;
   },
 
   async resetPassword(data: { tokenOrOtp: string; newPassword: string }): Promise<{ message: string }> {
-    const res = await apiClient.post(API_CONFIG.ENDPOINTS.AUTH_RESET_PASSWORD, data);
+    const res = await apiClient.post<{ message: string }>(API_CONFIG.ENDPOINTS.AUTH_RESET_PASSWORD, data);
     return res.data;
   },
 
@@ -60,7 +60,7 @@ export const authService = {
     } catch (e) {
       // ignore server logout failure and clear storage
     }
-    await AsyncStorage.multiRemove([TOKEN_KEY, REFRESH_TOKEN_KEY, '@docuscan_user_profile']);
+    await AsyncStorage.multiRemove([TOKEN_KEY, REFRESH_TOKEN_KEY, '@fic_locker_user_profile']);
   },
 
   async isAuthenticated(): Promise<boolean> {

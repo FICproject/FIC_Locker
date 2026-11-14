@@ -30,7 +30,7 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
           PermissionsAndroid.PERMISSIONS.CAMERA,
           {
             title: 'Camera Permission',
-            message: 'DocuScan needs access to your camera to scan documents.',
+            message: 'FIC Locker needs access to your camera to scan documents.',
             buttonNeutral: 'Ask Me Later',
             buttonNegative: 'Cancel',
             buttonPositive: 'OK',

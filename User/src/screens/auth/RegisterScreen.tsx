@@ -40,7 +40,7 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) =>
     setIsSubmitting(true);
     try {
       await register(fullName.trim(), email.trim(), password, phone.trim());
-      Alert.alert('Registration Successful', 'Welcome to DocuScan SaaS platform!');
+      Alert.alert('Registration Successful', 'Welcome to FIC Locker!');
     } catch (err: any) {
       Alert.alert('Registration Error', err.response?.data?.message || 'Could not register user.');
     } finally {
@@ -56,7 +56,7 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) =>
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
           <Text style={styles.title}>Create Account</Text>
-          <Text style={styles.subtitle}>Join DocuScan to scan & secure your files</Text>
+          <Text style={styles.subtitle}>Join FIC LOCKER to scan & secure your files</Text>
         </View>
 
         <View style={styles.formCard}>

@@ -44,19 +44,37 @@ export async function authenticateAdmin(req: Request, _res: Response, next: Next
       throw new HttpError(403, 'Forbidden: Platform Admin privileges are required.');
     }
 
-    const session = await AdminSession.findOne({
-      _id: payload.sessionId,
-      adminId: payload.sub,
-      revokedAt: null,
-      expiresAt: { $gt: new Date() },
-    });
+    let session = await AdminSession.findById(payload.sessionId);
+    if (session) {
+      if (session.revokedAt || session.expiresAt <= new Date()) {
+        throw new HttpError(401, 'Admin session is invalid, revoked, or expired.');
+      }
+    } else if (env.useLocalEmbeddedDb || env.nodeEnv === 'development') {
+      const fallbackAccount = await AdminCredential.findOne({
+        $or: [{ _id: payload.sub }, { email: payload.email.toLowerCase() }],
+        singletonKey: 'PLATFORM_ADMIN',
+      });
+      if (fallbackAccount) {
+        // Auto-restore session in embedded/development mode when server reloaded
+        session = await AdminSession.create({
+          _id: payload.sessionId,
+          adminId: fallbackAccount._id,
+          refreshTokenHash: 'auto-restored',
+          sourceApp: (req.get('x-client-platform') as any) || 'admin-web',
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent'),
+          lastUsedAt: new Date(),
+          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        });
+      }
+    }
 
     if (!session) {
       throw new HttpError(401, 'Admin session is invalid, revoked, or expired.');
     }
 
     const adminAccount = await AdminCredential.findOne({
-      _id: payload.sub,
+      $or: [{ _id: payload.sub }, { email: payload.email.toLowerCase() }],
       singletonKey: 'PLATFORM_ADMIN',
     }).select('_id email name');
 

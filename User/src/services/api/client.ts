@@ -2,8 +2,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
 import { API_CONFIG } from '../../constants';
 
-const TOKEN_KEY = '@docuscan_access_token';
-const REFRESH_TOKEN_KEY = '@docuscan_refresh_token';
+const TOKEN_KEY = '@fic_locker_access_token';
+const REFRESH_TOKEN_KEY = '@fic_locker_refresh_token';
 
 class ApiClient {
   private instance: AxiosInstance;
@@ -18,9 +18,10 @@ class ApiClient {
       },
     });
 
-    // Request interceptor to attach JWT bearer token
+    // Request interceptor to attach JWT bearer token & dynamic dev baseURL
     this.instance.interceptors.request.use(
       async (config) => {
+        config.baseURL = API_CONFIG.BASE_URL;
         try {
           const token = await AsyncStorage.getItem(TOKEN_KEY);
           if (token && config.headers) {

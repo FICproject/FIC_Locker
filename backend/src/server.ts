@@ -8,8 +8,8 @@ async function main() {
   await ensureBaselineSeed();
 
   const app = createApp();
-  app.listen(env.port, () => {
-    console.log(`[Backend] Shared API server listening on http://localhost:${env.port}${env.apiPrefix}`);
+  app.listen(env.port, '0.0.0.0', () => {
+    console.log(`[Backend] Shared API server listening on http://0.0.0.0:${env.port}${env.apiPrefix}`);
   });
 }
 
