@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet, TouchableOpacity, Text, Platform } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Text, Platform, StatusBar } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { colors, shadows } from '../theme';
@@ -36,20 +36,11 @@ import {
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
-// Custom Central Scan Tab Button
-const CustomTabBarScanButton = ({ children, onPress }: any) => (
-  <TouchableOpacity
-    style={styles.scanBtnContainer}
-    onPress={onPress}
-    activeOpacity={0.85}
-  >
-    <View style={styles.scanBtnCircle}>{children}</View>
-  </TouchableOpacity>
-);
-
 const BottomTabNavigator = () => {
   return (
-    <Tab.Navigator
+    <>
+      <StatusBar barStyle="dark-content" backgroundColor="#F8F9FE" translucent={false} />
+      <Tab.Navigator
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: true,
@@ -81,9 +72,8 @@ const BottomTabNavigator = () => {
         name="ScanTab"
         component={ScannerScreen}
         options={{
-          tabBarLabel: '',
-          tabBarIcon: ({ color }) => <ScanIcon color="#FFFFFF" size={26} />,
-          tabBarButton: (props) => <CustomTabBarScanButton {...props} />,
+          tabBarLabel: 'Scan',
+          tabBarIcon: ({ color, size }) => <ScanIcon color={color} size={size} />,
         }}
       />
 
@@ -105,7 +95,8 @@ const BottomTabNavigator = () => {
         }}
       />
     </Tab.Navigator>
-  );
+  </>
+);
 };
 
 export const AppNavigator = () => {
@@ -141,20 +132,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     marginTop: 2,
-  },
-  scanBtnContainer: {
-    top: -24,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  scanBtnCircle: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
-    backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    ...shadows.glow,
   },
 });
 

@@ -150,8 +150,6 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
           FIC <Text style={styles.brandTitleAccent}>LOCKER</Text>
         </Text>
         <Text style={styles.tagline}>Scan  •  Store  •  Access</Text>
-        <View style={styles.divider} />
-        <Text style={styles.subtext}>Your Documents, Always Safe</Text>
 
         {/* Feature Highlights Card (Secure Your Files • Fast Scanning • Secure Backup) */}
         <View style={[styles.featuresCard, { width: Math.min(screenWidth * 0.88, 340) }]}>
@@ -238,17 +236,6 @@ const styles = StyleSheet.create({
     marginTop: 6,
     letterSpacing: 0.5,
   },
-  divider: {
-    width: 140,
-    height: 1.5,
-    backgroundColor: '#D1C4E9',
-    marginVertical: 10,
-  },
-  subtext: {
-    fontSize: typography.fontSizes.sm,
-    color: '#6F6196',
-    fontWeight: typography.fontWeights.regular,
-  },
   featuresCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -257,7 +244,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingVertical: 10,
     paddingHorizontal: 8,
-    marginTop: 16,
+    marginTop: 20,
     borderWidth: 1,
     borderColor: '#EDE9FE',
     shadowColor: '#6C47FF',

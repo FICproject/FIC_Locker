@@ -11,20 +11,69 @@ import {
   Platform,
   ScrollView,
   Image,
+  StatusBar,
+  useWindowDimensions,
 } from 'react-native';
-import { colors, typography, borderRadius, shadows } from '../../theme';
+import Svg, { Path, Rect, Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { useAuth } from '../../context/AuthContext';
 
 interface LoginScreenProps {
   navigation: any;
 }
 
+const MailOutlineIcon: React.FC<{ size?: number; color?: string }> = ({ size = 15, color = '#6D28D9' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+    <Rect x="2" y="4" width="20" height="16" rx="3" />
+    <Path d="M22 6l-10 7L2 6" />
+  </Svg>
+);
+
+const LockOutlineIcon: React.FC<{ size?: number; color?: string }> = ({ size = 15, color = '#6D28D9' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+    <Rect x="4" y="11" width="16" height="11" rx="2.5" />
+    <Path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </Svg>
+);
+
+const EyeIcon: React.FC<{ size?: number; color?: string }> = ({ size = 19, color = '#6D28D9' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+    <Path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+    <Circle cx="12" cy="12" r="3" />
+  </Svg>
+);
+
+const EyeOffIcon: React.FC<{ size?: number; color?: string }> = ({ size = 19, color = '#6D28D9' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+    <Path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+    <Path d="M1 1l22 22" />
+  </Svg>
+);
+
+const ArrowRightIcon: React.FC<{ size?: number; color?: string }> = ({ size = 18, color = '#FFFFFF' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
+    <Path d="M5 12h14" />
+    <Path d="M12 5l7 7-7 7" />
+  </Svg>
+);
+
+const CheckIcon: React.FC<{ size?: number; color?: string }> = ({ size = 11, color = '#FFFFFF' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={3.5} strokeLinecap="round" strokeLinejoin="round">
+    <Path d="M20 6L9 17l-5-5" />
+  </Svg>
+);
+
 export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
   const { login } = useAuth();
+  const { width: screenWidth } = useWindowDimensions();
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSecure, setIsSecure] = useState(true);
+
+  const heroWidth = Math.min(screenWidth * 0.46, 200);
+  const heroHeight = Math.round(heroWidth * 0.85);
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -42,266 +91,328 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={styles.container}
-    >
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        {/* Top Header Card */}
-        <View style={styles.header}>
-          <View style={styles.iconContainer}>
+    <View style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor="#F7F4FE" translucent={false} />
+
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.keyboardContainer}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Top Header Section */}
+          <View style={styles.header}>
+            {/* Left Header Content */}
+            <View style={styles.headerLeft}>
+              {/* Welcome Headings */}
+              <Text style={styles.welcomeHeading}>Welcome{'\n'}Back!</Text>
+              <Text style={styles.welcomeSubtitle}>
+                Sign in to access your{'\n'}documents, always safe.
+              </Text>
+            </View>
+
+            {/* 3D Phone Hero Illustration positioned on right */}
             <Image
-              source={require('../../assets/images/scanner_hero.png')}
-              style={styles.logoBadge}
+              source={require('../../assets/images/login_hero_3d.png')}
+              style={[styles.hero3dImage, { width: heroWidth, height: heroHeight }]}
               resizeMode="contain"
             />
           </View>
-          <Text style={styles.welcomeText}>Welcome Back!</Text>
-          <Text style={styles.subtitleText}>Sign in to your account</Text>
-        </View>
 
-        {/* Form Container */}
-        <View style={styles.formCard}>
-          {/* Email Input */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Email Address</Text>
-            <View style={styles.inputWrapper}>
-              <TextInput
-                style={styles.input}
-                placeholder="name@example.com"
-                placeholderTextColor={colors.textMuted}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                value={email}
-                onChangeText={setEmail}
-              />
+          {/* Form Card */}
+          <View style={styles.formCard}>
+            {/* Email Input */}
+            <View style={styles.inputGroup}>
+              <View style={styles.labelRow}>
+                <MailOutlineIcon size={15} color="#6D28D9" />
+                <Text style={styles.label}>Email Address</Text>
+              </View>
+              <View style={styles.inputWrapper}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter your email address"
+                  placeholderTextColor="#8C7CA8"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  value={email}
+                  onChangeText={setEmail}
+                />
+              </View>
             </View>
-          </View>
 
-          {/* Password Input */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Password</Text>
-            <View style={styles.inputWrapper}>
-              <TextInput
-                style={styles.input}
-                placeholder="••••••••"
-                placeholderTextColor={colors.textMuted}
-                secureTextEntry={isSecure}
-                value={password}
-                onChangeText={setPassword}
-              />
+            {/* Password Input */}
+            <View style={styles.inputGroup}>
+              <View style={styles.labelRow}>
+                <LockOutlineIcon size={15} color="#6D28D9" />
+                <Text style={styles.label}>Password</Text>
+              </View>
+              <View style={styles.inputWrapper}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter your password"
+                  placeholderTextColor="#8C7CA8"
+                  secureTextEntry={isSecure}
+                  value={password}
+                  onChangeText={setPassword}
+                />
+                <TouchableOpacity
+                  onPress={() => setIsSecure(!isSecure)}
+                  style={styles.eyeBtn}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                >
+                  {isSecure ? (
+                    <EyeOffIcon size={19} color="#6D28D9" />
+                  ) : (
+                    <EyeIcon size={19} color="#6D28D9" />
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Options Row (Remember Me & Forgot Password) */}
+            <View style={styles.optionsRow}>
               <TouchableOpacity
-                onPress={() => setIsSecure(!isSecure)}
-                style={styles.eyeBtn}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                style={styles.rememberMeContainer}
+                onPress={() => setRememberMe(!rememberMe)}
+                activeOpacity={0.7}
               >
-                <Text style={styles.eyeText}>{isSecure ? '👁' : '🙈'}</Text>
+                <View style={[styles.checkbox, rememberMe && styles.checkboxActive]}>
+                  {rememberMe && <CheckIcon size={11} color="#FFFFFF" />}
+                </View>
+                <Text style={styles.rememberMeText}>Remember Me</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => navigation.navigate('ForgotPassword')}
+                style={styles.forgotBtn}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.forgotText}>Forgot Password?</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Login Button with Vibrant Purple Gradient */}
+            <TouchableOpacity
+              style={[styles.primaryButton, isSubmitting && styles.buttonDisabled]}
+              onPress={handleLogin}
+              disabled={isSubmitting}
+              activeOpacity={0.85}
+            >
+              <Svg style={StyleSheet.absoluteFillObject} width="100%" height="100%">
+                <Defs>
+                  <LinearGradient id="loginBtnGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <Stop offset="0%" stopColor="#7C3AED" />
+                    <Stop offset="50%" stopColor="#6D28D9" />
+                    <Stop offset="100%" stopColor="#5B21B6" />
+                  </LinearGradient>
+                </Defs>
+                <Rect width="100%" height="100%" rx={26} fill="url(#loginBtnGrad)" />
+              </Svg>
+
+              {isSubmitting ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <View style={styles.buttonContentRow}>
+                  <Text style={styles.primaryButtonText}>Login</Text>
+                  <ArrowRightIcon size={18} color="#FFFFFF" />
+                </View>
+              )}
+            </TouchableOpacity>
+
+            {/* Sign Up Redirect */}
+            <View style={styles.signupPrompt}>
+              <Text style={styles.signupPromptText}>Don’t have an account? </Text>
+              <TouchableOpacity
+                onPress={() => navigation.navigate('Register')}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.signupLink}>Sign Up</Text>
               </TouchableOpacity>
             </View>
           </View>
-
-          <TouchableOpacity
-            onPress={() => navigation.navigate('ForgotPassword')}
-            style={styles.forgotBtn}
-          >
-            <Text style={styles.forgotText}>Forgot Password?</Text>
-          </TouchableOpacity>
-
-          {/* Sign In Button */}
-          <TouchableOpacity
-            style={[styles.primaryButton, isSubmitting && styles.buttonDisabled]}
-            onPress={handleLogin}
-            disabled={isSubmitting}
-            activeOpacity={0.8}
-          >
-            {isSubmitting ? (
-              <ActivityIndicator color="#FFFFFF" size="small" />
-            ) : (
-              <Text style={styles.primaryButtonText}>Login</Text>
-            )}
-          </TouchableOpacity>
-
-          <View style={styles.dividerRow}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>OR</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          {/* Alternative Google Sign-in */}
-          <TouchableOpacity
-            style={styles.socialButton}
-            onPress={() => handleLogin()}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.socialIcon}>G</Text>
-            <Text style={styles.socialButtonText}>Continue with Google</Text>
-          </TouchableOpacity>
-
-          {/* Sign Up Redirect */}
-          <View style={styles.signupPrompt}>
-            <Text style={styles.signupPromptText}>Don't have an account? </Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Register')}>
-              <Text style={styles.signupLink}>Sign Up</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9F8FE',
+    backgroundColor: '#F7F4FE',
+  },
+  keyboardContainer: {
+    flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 24,
-    paddingTop: 60,
-    paddingBottom: 40,
-    alignItems: 'center',
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'ios' ? 24 : 20,
+    paddingBottom: 28,
   },
   header: {
+    width: '100%',
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 32,
+    justifyContent: 'space-between',
+    marginBottom: 20,
   },
-  iconContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 20,
-    backgroundColor: '#EDE9FE',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-    ...shadows.subtle,
+  hero3dImage: {
+    marginRight: -6,
   },
-  logoBadge: {
-    width: 54,
-    height: 54,
+  headerLeft: {
+    flex: 1,
+    paddingRight: 10,
+    paddingLeft: 4,
   },
-  welcomeText: {
-    fontSize: 26,
-    fontWeight: typography.fontWeights.bold,
-    color: colors.text,
-    letterSpacing: -0.3,
+  welcomeHeading: {
+    fontSize: 32,
+    lineHeight: 37,
+    fontWeight: '800',
+    color: '#100B36',
+    letterSpacing: -0.5,
+    marginBottom: 8,
   },
-  subtitleText: {
-    fontSize: typography.fontSizes.sm,
-    color: colors.textSecondary,
-    marginTop: 4,
+  welcomeSubtitle: {
+    fontSize: 13.5,
+    lineHeight: 19,
+    color: '#4E426D',
+    fontWeight: '400',
   },
   formCard: {
     width: '100%',
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.xl,
-    padding: 24,
-    ...shadows.card,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    paddingHorizontal: 22,
+    paddingVertical: 26,
+    shadowColor: '#6D28D9',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    elevation: 6,
   },
   inputGroup: {
+    width: '100%',
     marginBottom: 18,
   },
-  label: {
-    fontSize: typography.fontSizes.sm,
-    fontWeight: typography.fontWeights.medium,
-    color: colors.textSecondary,
-    marginBottom: 8,
-  },
-  inputWrapper: {
+  labelRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 8,
+    paddingLeft: 2,
+  },
+  label: {
+    fontSize: 13.5,
+    fontWeight: '600',
+    color: '#1A1338',
+    marginLeft: 8,
+  },
+  inputWrapper: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F5EEFC',
+    borderRadius: 25,
+    paddingHorizontal: 18,
+    height: 50,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: borderRadius.md,
-    backgroundColor: '#FAFAFF',
-    paddingHorizontal: 14,
-    height: 48,
+    borderColor: '#EDE5F8',
   },
   input: {
     flex: 1,
-    fontSize: typography.fontSizes.base,
-    color: colors.text,
+    fontSize: 14.5,
+    color: '#1A1338',
+    paddingVertical: 0,
   },
   eyeBtn: {
-    padding: 4,
+    padding: 6,
   },
-  eyeText: {
-    fontSize: 18,
+  optionsRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 4,
+    marginBottom: 24,
+    paddingHorizontal: 2,
   },
-  forgotBtn: {
-    alignSelf: 'flex-end',
-    marginBottom: 20,
+  rememberMeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  forgotText: {
-    fontSize: typography.fontSizes.sm,
-    color: colors.primary,
-    fontWeight: typography.fontWeights.medium,
-  },
-  primaryButton: {
-    backgroundColor: colors.primary,
-    height: 50,
-    borderRadius: borderRadius.md,
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: '#8B5CF6',
     alignItems: 'center',
     justifyContent: 'center',
-    ...shadows.glow,
+    backgroundColor: 'transparent',
+    marginRight: 9,
+  },
+  checkboxActive: {
+    backgroundColor: '#7C3AED',
+    borderColor: '#7C3AED',
+  },
+  rememberMeText: {
+    fontSize: 13,
+    color: '#342954',
+    fontWeight: '500',
+  },
+  forgotBtn: {
+    paddingVertical: 4,
+  },
+  forgotText: {
+    fontSize: 13,
+    color: '#6D28D9',
+    fontWeight: '600',
+  },
+  primaryButton: {
+    width: '100%',
+    height: 52,
+    borderRadius: 26,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#7C3AED',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 6,
   },
   buttonDisabled: {
     opacity: 0.7,
   },
-  primaryButtonText: {
-    color: '#FFFFFF',
-    fontSize: typography.fontSizes.md,
-    fontWeight: typography.fontWeights.bold,
-  },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 20,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: colors.divider,
-  },
-  dividerText: {
-    marginHorizontal: 12,
-    fontSize: typography.fontSizes.xs,
-    color: colors.textMuted,
-    fontWeight: typography.fontWeights.bold,
-  },
-  socialButton: {
+  buttonContentRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 48,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
   },
-  socialIcon: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#4285F4',
-    marginRight: 10,
-  },
-  socialButtonText: {
-    fontSize: typography.fontSizes.base,
-    color: colors.text,
-    fontWeight: typography.fontWeights.medium,
+  primaryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+    marginRight: 8,
   },
   signupPrompt: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: 24,
+    alignItems: 'center',
+    marginTop: 22,
+    paddingBottom: 2,
   },
   signupPromptText: {
-    fontSize: typography.fontSizes.sm,
-    color: colors.textSecondary,
+    fontSize: 13.5,
+    color: '#4B3F72',
   },
   signupLink: {
-    fontSize: typography.fontSizes.sm,
-    color: colors.primary,
-    fontWeight: typography.fontWeights.bold,
+    fontSize: 13.5,
+    color: '#6D28D9',
+    fontWeight: '700',
   },
 });
-

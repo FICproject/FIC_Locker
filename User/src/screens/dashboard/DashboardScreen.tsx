@@ -8,6 +8,8 @@ import {
   TextInput,
   RefreshControl,
   Image,
+  StatusBar,
+  Platform,
 } from 'react-native';
 import { colors, typography, borderRadius, shadows } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
@@ -115,6 +117,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
 
   return (
     <View style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor="#F8F9FE" translucent={false} />
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -122,9 +125,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
       >
         {/* Header with Greeting & Avatar */}
         <View style={styles.header}>
-          <View>
+          <View style={styles.greetingContainer}>
             <View style={styles.greetingRow}>
-              <Text style={styles.greeting}>Hello, {user?.name?.split(' ')[0] || 'Dhanu'}</Text>
+              <Text style={styles.greeting} numberOfLines={1}>
+                Hello, {user?.name?.split(' ')[0] || 'Dhanu'}
+              </Text>
               <Text style={styles.waveEmoji}>👋</Text>
             </View>
             <Text style={styles.greetingSub}>Your documents are safe with us!</Text>
@@ -133,6 +138,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
           <TouchableOpacity
             style={styles.bellButton}
             onPress={() => navigation.navigate('Notifications')}
+            activeOpacity={0.7}
           >
             <BellIcon size={22} color={colors.text} />
             <View style={styles.badgeDot} />
@@ -166,29 +172,32 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
           </TouchableOpacity>
         </View>
 
-        {/* Action Buttons: Quick Scan & Upload Document */}
-        <TouchableOpacity
-          style={styles.quickScanButton}
-          onPress={() => navigation.navigate('ScanTab')}
-          activeOpacity={0.85}
-        >
-          <View style={styles.scanIconWrapper}>
-            <ScanIcon size={24} color="#FFFFFF" />
-          </View>
-          <View style={styles.quickScanTextContainer}>
-            <Text style={styles.quickScanTitle}>Quick Scan</Text>
-            <Text style={styles.quickScanSub}>Scan Documents with Camera</Text>
-          </View>
-        </TouchableOpacity>
+        {/* Action Buttons: 2-Column Grid (Quick Scan & Upload Document) */}
+        <View style={styles.actionGridRow}>
+          <TouchableOpacity
+            style={styles.quickScanGridCard}
+            onPress={() => navigation.navigate('ScanTab')}
+            activeOpacity={0.85}
+          >
+            <View style={styles.scanGridIconBadge}>
+              <ScanIcon size={22} color="#FFFFFF" />
+            </View>
+            <Text style={styles.quickScanGridTitle}>Quick Scan</Text>
+            <Text style={styles.quickScanGridSub}>With Camera</Text>
+          </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.uploadDocButton}
-          onPress={() => navigation.navigate('UploadDocument')}
-          activeOpacity={0.85}
-        >
-          <UploadIcon size={20} color={colors.primary} />
-          <Text style={styles.uploadDocText}>Upload Document</Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.uploadGridCard}
+            onPress={() => navigation.navigate('UploadDocument')}
+            activeOpacity={0.85}
+          >
+            <View style={styles.uploadGridIconBadge}>
+              <UploadIcon size={22} color={colors.primary} />
+            </View>
+            <Text style={styles.uploadGridTitle}>Upload Document</Text>
+            <Text style={styles.uploadGridSub}>From Storage / Files</Text>
+          </TouchableOpacity>
+        </View>
 
         {/* Search Bar */}
         <View style={styles.searchBar}>
@@ -246,46 +255,54 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 20,
-    paddingTop: 54,
-    paddingBottom: 30,
+    paddingTop: Platform.OS === 'ios' ? 24 : 26,
+    paddingBottom: 32,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 22,
+    marginTop: 4,
+  },
+  greetingContainer: {
+    flex: 1,
+    marginRight: 16,
   },
   greetingRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   greeting: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: typography.fontWeights.bold,
     color: colors.text,
+    letterSpacing: -0.3,
   },
   waveEmoji: {
-    fontSize: 20,
-    marginLeft: 6,
+    fontSize: 22,
+    marginLeft: 8,
   },
   greetingSub: {
     fontSize: typography.fontSizes.sm,
     color: colors.textSecondary,
-    marginTop: 2,
+    marginTop: 3,
   },
   bellButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
     ...shadows.subtle,
   },
   badgeDot: {
     position: 'absolute',
-    top: 10,
-    right: 12,
+    top: 11,
+    right: 13,
     width: 8,
     height: 8,
     borderRadius: 4,
@@ -322,48 +339,68 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginTop: 4,
   },
-  quickScanButton: {
+  actionGridRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  quickScanGridCard: {
+    flex: 0.48,
     backgroundColor: colors.primary,
     borderRadius: borderRadius.lg,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    marginBottom: 12,
+    padding: 16,
+    justifyContent: 'space-between',
+    minHeight: 114,
     ...shadows.glow,
   },
-  scanIconWrapper: {
-    marginRight: 14,
+  scanGridIconBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
   },
-  quickScanTextContainer: {
-    flex: 1,
-  },
-  quickScanTitle: {
+  quickScanGridTitle: {
     color: '#FFFFFF',
-    fontSize: typography.fontSizes.md,
+    fontSize: typography.fontSizes.base,
     fontWeight: typography.fontWeights.bold,
   },
-  quickScanSub: {
+  quickScanGridSub: {
     color: '#E0D4FC',
     fontSize: typography.fontSizes.xs,
     marginTop: 2,
   },
-  uploadDocButton: {
-    flexDirection: 'row',
+  uploadGridCard: {
+    flex: 0.48,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    padding: 16,
+    borderWidth: 1.5,
+    borderColor: '#EDE9FE',
+    justifyContent: 'space-between',
+    minHeight: 114,
+    ...shadows.card,
+  },
+  uploadGridIconBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#EDE9FE',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.surface,
-    borderWidth: 1.5,
-    borderColor: '#E0D4FC',
-    borderRadius: borderRadius.lg,
-    paddingVertical: 12,
-    marginBottom: 18,
+    marginBottom: 10,
   },
-  uploadDocText: {
-    color: colors.primary,
+  uploadGridTitle: {
+    color: colors.text,
     fontSize: typography.fontSizes.base,
-    fontWeight: typography.fontWeights.semiBold,
-    marginLeft: 8,
+    fontWeight: typography.fontWeights.bold,
+  },
+  uploadGridSub: {
+    color: colors.textSecondary,
+    fontSize: typography.fontSizes.xs,
+    marginTop: 2,
   },
   searchBar: {
     flexDirection: 'row',
