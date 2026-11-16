@@ -22,6 +22,7 @@ export interface IStoredDocument extends Document {
   failureReason?: string;
   operationalNotes?: string;
   notes?: string;
+  ocrText?: string;
   isFavourite?: boolean;
   isArchived?: boolean;
   expiryDate?: Date | null;
@@ -61,6 +62,7 @@ const StoredDocumentSchema = new Schema<IStoredDocument>(
     failureReason: { type: String },
     operationalNotes: { type: String },
     notes: { type: String },
+    ocrText: { type: String },
     isFavourite: { type: Boolean, default: false },
     isArchived: { type: Boolean, default: false },
     expiryDate: { type: Date, default: null },

@@ -71,3 +71,26 @@ export const BellIcon: React.FC<IconProps> = ({ size = 22, color = '#111827', ..
   </Svg>
 );
 
+export const CameraIcon: React.FC<IconProps> = ({ size = 24, color = '#FFFFFF', ...props }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <Path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+    <Circle cx="12" cy="13" r="4" />
+  </Svg>
+);
+
+export const PlusIcon: React.FC<IconProps> = ({ size = 24, color = '#FFFFFF', ...props }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <Path d="M12 5v14" />
+    <Path d="M5 12h14" />
+  </Svg>
+);
+
+export const ToolsIcon: React.FC<IconProps> = ({ size = 24, color = '#6B7280', ...props }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <Rect x="2" y="7" width="20" height="14" rx="2" />
+    <Path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
+    <Path d="M12 12v3" />
+    <Path d="M2 13h20" />
+  </Svg>
+);
+

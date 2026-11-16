@@ -1,6 +1,7 @@
 import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { apiClient } from './client';
-import { API_CONFIG, resolveDevHost, setApiHostOverride } from '../../constants';
+import { API_CONFIG, resolveDevHost, setApiHostOverride, DEV_CANDIDATE_HOSTS } from '../../constants';
 import {
   DocumentItem,
   UploadAuthorisationResponse,
@@ -23,11 +24,27 @@ export const documentService = {
     isFavourite?: boolean;
     isArchived?: boolean;
   }): Promise<{ documents: DocumentItem[]; total: number }> {
-    const res = await apiClient.get<{ documents: DocumentItem[]; total: number }>(
-      API_CONFIG.ENDPOINTS.DOCUMENTS,
-      { params }
-    );
-    return res.data;
+    try {
+      const res = await apiClient.get<{ documents: DocumentItem[]; total: number }>(
+        API_CONFIG.ENDPOINTS.DOCUMENTS,
+        { params }
+      );
+      return res.data;
+    } catch (primaryErr) {
+      for (const host of DEV_CANDIDATE_HOSTS) {
+        try {
+          const res = await axios.get<{ documents: DocumentItem[]; total: number }>(
+            `http://${host}:5000/api/v1${API_CONFIG.ENDPOINTS.DOCUMENTS}`,
+            { params, timeout: 3500 }
+          );
+          if (res.data?.documents) {
+            setApiHostOverride(host);
+            return res.data;
+          }
+        } catch {}
+      }
+      throw primaryErr;
+    }
   },
 
   async getDocumentById(id: string): Promise<DocumentItem> {
@@ -45,11 +62,72 @@ export const documentService = {
     notes?: string;
     expiryDate?: string;
   }): Promise<UploadAuthorisationResponse> {
-    const res = await apiClient.post<UploadAuthorisationResponse>(
-      API_CONFIG.ENDPOINTS.DOCUMENT_UPLOAD_AUTH,
-      data
-    );
-    return res.data;
+    try {
+      const res = await apiClient.post<UploadAuthorisationResponse>(
+        API_CONFIG.ENDPOINTS.DOCUMENT_UPLOAD_AUTH,
+        data
+      );
+      return res.data;
+    } catch (primaryErr) {
+      for (const host of DEV_CANDIDATE_HOSTS) {
+        try {
+          const res = await axios.post<UploadAuthorisationResponse>(
+            `http://${host}:5000/api/v1${API_CONFIG.ENDPOINTS.DOCUMENT_UPLOAD_AUTH}`,
+            data,
+            { timeout: 4000 }
+          );
+          if (res.data?.documentId) {
+            setApiHostOverride(host);
+            return res.data;
+          }
+        } catch {}
+      }
+      throw primaryErr;
+    }
+  },
+
+  async syncOfflineDocuments(): Promise<number> {
+    try {
+      const cached = await AsyncStorage.getItem('@fic_locker_offline_docs');
+      if (!cached) return 0;
+      const list: DocumentItem[] = JSON.parse(cached);
+      let syncedCount = 0;
+      const updatedList: DocumentItem[] = [];
+
+      for (const doc of list) {
+        if (doc._id && doc._id.startsWith('doc_local_')) {
+          try {
+            const authRes = await this.requestUploadAuth({
+              fileName: doc.name || doc.originalFileName || 'Scanned_Doc.jpg',
+              fileSizeBytes: doc.fileSizeBytes || 1572864,
+              mimeType: doc.mimeType || 'image/jpeg',
+              category: doc.category || 'Personal Documents',
+              tags: doc.tags || [],
+              notes: doc.notes || undefined,
+            });
+            if (authRes?.documentId) {
+              syncedCount++;
+              updatedList.push({
+                ...doc,
+                _id: authRes.documentId,
+                status: 'available',
+              });
+              continue;
+            }
+          } catch (syncErr) {
+            console.warn('[Sync] Failed to sync document:', doc.name, syncErr);
+          }
+        }
+        updatedList.push(doc);
+      }
+
+      if (syncedCount > 0) {
+        await AsyncStorage.setItem('@fic_locker_offline_docs', JSON.stringify(updatedList));
+      }
+      return syncedCount;
+    } catch {
+      return 0;
+    }
   },
 
   async confirmUpload(documentId: string, payload: { storageKey: string; checksum?: string }): Promise<DocumentItem> {
@@ -93,6 +171,20 @@ export const documentService = {
   async moveDocument(id: string, folderId: string | null): Promise<DocumentItem> {
     const res = await apiClient.patch<{ document: DocumentItem }>(API_CONFIG.ENDPOINTS.DOCUMENT_MOVE(id), {
       folderId,
+    });
+    return res.data.document;
+  },
+
+  async renameDocument(id: string, name: string): Promise<DocumentItem> {
+    const res = await apiClient.patch<{ document: DocumentItem }>(API_CONFIG.ENDPOINTS.DOCUMENT_RENAME(id), {
+      name,
+    });
+    return res.data.document;
+  },
+
+  async updateOcrText(id: string, ocrText: string): Promise<DocumentItem> {
+    const res = await apiClient.patch<{ document: DocumentItem }>(API_CONFIG.ENDPOINTS.DOCUMENT_OCR(id), {
+      ocrText,
     });
     return res.data.document;
   },

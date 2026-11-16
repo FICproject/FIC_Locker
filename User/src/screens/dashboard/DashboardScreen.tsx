@@ -17,6 +17,7 @@ import { documentService, storageService } from '../../services/api/documentServ
 import { DocumentItem, StorageInfo } from '../../types';
 import { formatBytes } from '../../utils/formatters';
 import { BellIcon, SearchIcon, ScanIcon, UploadIcon } from '../../assets/icons';
+import { DocScannerFab } from '../../components/common/DocScannerFab';
 
 interface DashboardScreenProps {
   navigation: any;
@@ -123,16 +124,31 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header with Greeting & Avatar */}
+        {/* Greeting Header */}
         <View style={styles.header}>
           <View style={styles.greetingContainer}>
             <View style={styles.greetingRow}>
               <Text style={styles.greeting} numberOfLines={1}>
-                Hello, {user?.name?.split(' ')[0] || 'Dhanu'}
+                Hello, {user?.name || user?.email?.split('@')[0] || 'dhanu.sri'}
               </Text>
               <Text style={styles.waveEmoji}>👋</Text>
             </View>
             <Text style={styles.greetingSub}>Your documents are safe with us!</Text>
+          </View>
+        </View>
+
+        {/* Search Bar on Notification Left Side */}
+        <View style={styles.searchNotificationRow}>
+          <View style={styles.searchBar}>
+            <SearchIcon size={18} color={colors.textMuted} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search documents..."
+              placeholderTextColor={colors.textMuted}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              onSubmitEditing={() => navigation.navigate('Search', { initialQuery: searchQuery })}
+            />
           </View>
 
           <TouchableOpacity
@@ -172,46 +188,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
           </TouchableOpacity>
         </View>
 
-        {/* Action Buttons: 2-Column Grid (Quick Scan & Upload Document) */}
-        <View style={styles.actionGridRow}>
-          <TouchableOpacity
-            style={styles.quickScanGridCard}
-            onPress={() => navigation.navigate('ScanTab')}
-            activeOpacity={0.85}
-          >
-            <View style={styles.scanGridIconBadge}>
-              <ScanIcon size={22} color="#FFFFFF" />
-            </View>
-            <Text style={styles.quickScanGridTitle}>Quick Scan</Text>
-            <Text style={styles.quickScanGridSub}>With Camera</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.uploadGridCard}
-            onPress={() => navigation.navigate('UploadDocument')}
-            activeOpacity={0.85}
-          >
-            <View style={styles.uploadGridIconBadge}>
-              <UploadIcon size={22} color={colors.primary} />
-            </View>
-            <Text style={styles.uploadGridTitle}>Upload Document</Text>
-            <Text style={styles.uploadGridSub}>From Storage / Files</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Search Bar */}
-        <View style={styles.searchBar}>
-          <SearchIcon size={18} color={colors.textMuted} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search documents..."
-            placeholderTextColor={colors.textMuted}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            onSubmitEditing={() => navigation.navigate('Search', { initialQuery: searchQuery })}
-          />
-        </View>
-
         {/* Recent Documents Section */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Recent Documents</Text>
@@ -244,6 +220,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
           })}
         </ScrollView>
       </ScrollView>
+
+      {/* Doc Scanner Floating Dual Action Pill [ Camera | Plus ] */}
+      <DocScannerFab
+        onPressScan={() => navigation.navigate('Scanner')}
+        onPressUpload={() => navigation.navigate('UploadDocument')}
+        bottomOffset={18}
+      />
     </View>
   );
 };
@@ -259,15 +242,11 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 22,
+    marginBottom: 16,
     marginTop: 4,
   },
   greetingContainer: {
     flex: 1,
-    marginRight: 16,
   },
   greetingRow: {
     flexDirection: 'row',
@@ -402,14 +381,20 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSizes.xs,
     marginTop: 2,
   },
+  searchNotificationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 18,
+    gap: 12,
+  },
   searchBar: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.surface,
     borderRadius: borderRadius.md,
     paddingHorizontal: 14,
     height: 46,
-    marginBottom: 24,
     borderWidth: 1,
     borderColor: colors.borderLight,
     ...shadows.subtle,

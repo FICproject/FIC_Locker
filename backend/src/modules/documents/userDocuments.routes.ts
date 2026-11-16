@@ -56,6 +56,7 @@ function formatDocument(doc: any) {
     folderId: doc.folderId ? doc.folderId.toString() : null,
     tags: doc.tags || [],
     notes: doc.notes || doc.operationalNotes || '',
+    ocrText: doc.ocrText || '',
     expiryDate: doc.expiryDate ? new Date(doc.expiryDate).toISOString() : undefined,
     isFavourite: !!doc.isFavourite,
     isArchived: !!doc.isArchived,
@@ -73,6 +74,7 @@ const uploadAuthSchema = z.object({
   tags: z.array(z.string()).optional().default([]),
   folderId: z.string().nullable().optional(),
   notes: z.string().optional(),
+  ocrText: z.string().optional(),
   expiryDate: z.string().optional(),
 });
 
@@ -116,6 +118,7 @@ userDocumentsRouter.post(
       totalSizeBytes: body.fileSizeBytes,
       status: 'available',
       notes: body.notes,
+      ocrText: body.ocrText || '',
       expiryDate: body.expiryDate ? new Date(body.expiryDate) : null,
     });
 
@@ -165,7 +168,13 @@ userDocumentsRouter.get(
     };
 
     if (search && typeof search === 'string' && search.trim()) {
-      filter.name = { $regex: search.trim(), $options: 'i' };
+      const q = search.trim();
+      filter.$or = [
+        { name: { $regex: q, $options: 'i' } },
+        { tags: { $regex: q, $options: 'i' } },
+        { notes: { $regex: q, $options: 'i' } },
+        { ocrText: { $regex: q, $options: 'i' } },
+      ];
     }
 
     if (String(isFavourite) === 'true') {
@@ -296,6 +305,51 @@ userDocumentsRouter.patch(
     const doc = await StoredDocument.findByIdAndUpdate(
       req.params.id,
       { $set: { folderId: folderId ? new mongoose.Types.ObjectId(folderId) : null } },
+      { new: true }
+    ).populate('categoryId');
+
+    if (!doc) {
+      throw new HttpError(404, 'Document not found.');
+    }
+    return res.json({
+      success: true,
+      document: formatDocument(doc),
+    });
+  })
+);
+
+// 8b. Rename Document
+userDocumentsRouter.patch(
+  '/:id/rename',
+  asyncHandler(async (req: Request, res: Response) => {
+    const { name } = req.body;
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      throw new HttpError(400, 'Valid document name is required.');
+    }
+    const doc = await StoredDocument.findByIdAndUpdate(
+      req.params.id,
+      { $set: { name: name.trim() } },
+      { new: true }
+    ).populate('categoryId');
+
+    if (!doc) {
+      throw new HttpError(404, 'Document not found.');
+    }
+    return res.json({
+      success: true,
+      document: formatDocument(doc),
+    });
+  })
+);
+
+// 8c. Update Document OCR Text
+userDocumentsRouter.patch(
+  '/:id/ocr',
+  asyncHandler(async (req: Request, res: Response) => {
+    const { ocrText } = req.body;
+    const doc = await StoredDocument.findByIdAndUpdate(
+      req.params.id,
+      { $set: { ocrText: String(ocrText || '') } },
       { new: true }
     ).populate('categoryId');
 
