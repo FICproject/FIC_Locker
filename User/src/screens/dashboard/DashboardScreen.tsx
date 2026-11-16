@@ -223,7 +223,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
 
       {/* Doc Scanner Floating Dual Action Pill [ Camera | Plus ] */}
       <DocScannerFab
-        onPressScan={() => navigation.navigate('ScanTab')}
+        onPressScan={() => navigation.navigate('Scanner')}
         onPressUpload={() => navigation.navigate('UploadDocument')}
         bottomOffset={18}
       />

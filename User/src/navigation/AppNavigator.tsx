@@ -7,6 +7,7 @@ import { colors, shadows } from '../theme';
 // Tabs
 import { DashboardScreen } from '../screens/dashboard/DashboardScreen';
 import { DocumentsListScreen } from '../screens/documents/DocumentsListScreen';
+import { ToolsScreen } from '../screens/tools/ToolsScreen';
 import { ScannerScreen } from '../screens/scanner/ScannerScreen';
 import { CategoriesScreen } from '../screens/categories/CategoriesScreen';
 import { ProfileScreen } from '../screens/profile/ProfileScreen';
@@ -28,6 +29,7 @@ import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen';
 import {
   HomeIcon,
   DocumentsIcon,
+  ToolsIcon,
   ScanIcon,
   CategoriesIcon,
   ProfileIcon,
@@ -69,11 +71,11 @@ const BottomTabNavigator = () => {
       />
 
       <Tab.Screen
-        name="ScanTab"
-        component={ScannerScreen}
+        name="ToolsTab"
+        component={ToolsScreen}
         options={{
-          tabBarLabel: 'Scan',
-          tabBarIcon: ({ color, size }) => <ScanIcon color={color} size={size} />,
+          tabBarLabel: 'Tools',
+          tabBarIcon: ({ color, size }) => <ToolsIcon color={color} size={size} />,
         }}
       />
 
@@ -103,6 +105,9 @@ export const AppNavigator = () => {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
       <Stack.Screen name="MainTabs" component={BottomTabNavigator} />
+      <Stack.Screen name="Scanner" component={ScannerScreen} />
+      <Stack.Screen name="ScanTab" component={ScannerScreen} />
+      <Stack.Screen name="Tools" component={ToolsScreen} />
       <Stack.Screen name="DocumentDetail" component={DocumentDetailScreen} />
       <Stack.Screen name="ScannerEdit" component={ScannerEditScreen} />
       <Stack.Screen name="UploadDocument" component={UploadDocumentScreen} />
