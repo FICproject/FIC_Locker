@@ -60,6 +60,11 @@ export interface DocumentItem {
   folderId?: string | null;
   tags: string[];
   notes?: string;
+  ocrText?: string;
+  pages?: string[];
+  isPasswordProtected?: boolean;
+  hasSignature?: boolean;
+  hasWatermark?: boolean;
   expiryDate?: string;
   isFavourite?: boolean;
   isArchived?: boolean;

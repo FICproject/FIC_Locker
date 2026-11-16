@@ -12,7 +12,7 @@ import {
   PermissionsAndroid,
   Platform,
 } from 'react-native';
-import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
+import { launchImageLibrary } from 'react-native-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, borderRadius, shadows } from '../../theme';
 import { documentService } from '../../services/api/documentService';
@@ -28,6 +28,8 @@ export const UploadDocumentScreen: React.FC<{ navigation: any; route: any }> = (
   const prefillName = route.params?.prefillName || '';
   const prefillUri = route.params?.pageUri || '';
   const rotationDeg = route.params?.rotationDeg || 0;
+  const ocrTextFromRoute = route.params?.ocrText || '';
+  const allPagesFromRoute = route.params?.allPages || [];
   const [docName, setDocName] = useState(prefillName || 'Document_' + Date.now() + '.jpg');
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(prefillUri || null);
   const [description, setDescription] = useState('');
@@ -77,17 +79,9 @@ export const UploadDocumentScreen: React.FC<{ navigation: any; route: any }> = (
   const handlePickOption = () => {
     Alert.alert('Upload Document', 'Choose how you want to add your document:', [
       {
-        text: '📸 Take Photo (Camera)',
-        onPress: async () => {
-          const hasPerm = await requestCameraPermission();
-          if (!hasPerm) return;
-          const res = await launchCamera({ mediaType: 'photo', quality: 0.9, saveToPhotos: true });
-          if (res.assets && res.assets[0]?.uri) {
-            setSelectedImageUri(res.assets[0].uri);
-            if (res.assets[0].fileName) {
-              setDocName(res.assets[0].fileName);
-            }
-          }
+        text: '📸 Scan Document (In-App Scanner)',
+        onPress: () => {
+          navigation.navigate('Scanner');
         },
       },
       {
@@ -169,10 +163,12 @@ export const UploadDocumentScreen: React.FC<{ navigation: any; route: any }> = (
         category,
         tags: parsedTags,
         notes: description.trim(),
+        ocrText: ocrTextFromRoute || undefined,
+        pageCount: allPagesFromRoute.length || 1,
+        pages: allPagesFromRoute.length ? allPagesFromRoute.map((p: any) => p.uri) : undefined,
         status: 'available',
         localUri: selectedImageUri || undefined,
         thumbnailUrl: selectedImageUri || undefined,
-        pageCount: 1,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -226,10 +222,12 @@ export const UploadDocumentScreen: React.FC<{ navigation: any; route: any }> = (
         category,
         tags: parsedTags,
         notes: description.trim(),
+        ocrText: ocrTextFromRoute || undefined,
+        pageCount: allPagesFromRoute.length || 1,
+        pages: allPagesFromRoute.length ? allPagesFromRoute.map((p: any) => p.uri) : undefined,
         status: 'available',
         localUri: selectedImageUri || undefined,
         thumbnailUrl: selectedImageUri || undefined,
-        pageCount: 1,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };

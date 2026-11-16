@@ -9,6 +9,7 @@ import {
   RefreshControl,
   Alert,
   Image,
+  Modal,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -17,16 +18,49 @@ import { documentService } from '../../services/api/documentService';
 import { DocumentItem } from '../../types';
 import { formatBytes, formatDate } from '../../utils/formatters';
 import { SearchIcon } from '../../assets/icons';
+import { RenameDocumentModal } from '../../components/modals/RenameDocumentModal';
+import { MoveDocumentModal } from '../../components/modals/MoveDocumentModal';
 
 const TABS = ['All', 'PDF', 'Images', 'Others'];
 
-export const DocumentsListScreen: React.FC<{ navigation: any; route?: any }> = ({ navigation, route }) => {
+type SortOption =
+  | 'date_desc'
+  | 'date_asc'
+  | 'name_asc'
+  | 'name_desc'
+  | 'size_desc'
+  | 'size_asc';
+
+const SORT_LABELS: Record<SortOption, string> = {
+  date_desc: 'Newest First',
+  date_asc: 'Oldest First',
+  name_asc: 'Name (A - Z)',
+  name_desc: 'Name (Z - A)',
+  size_desc: 'Size (Largest)',
+  size_asc: 'Size (Smallest)',
+};
+
+export const DocumentsListScreen: React.FC<{ navigation: any; route?: any }> = ({
+  navigation,
+  route,
+}) => {
   const [activeTab, setActiveTab] = useState('All');
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(route?.params?.category || null);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(
+    route?.params?.category || null
+  );
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
   const [isGridView, setIsGridView] = useState(true);
+
+  // Sorting State
+  const [sortOption, setSortOption] = useState<SortOption>('date_desc');
+  const [sortModalVisible, setSortModalVisible] = useState(false);
+
+  // Document action modals
+  const [selectedDocForAction, setSelectedDocForAction] = useState<DocumentItem | null>(null);
+  const [renameModalVisible, setRenameModalVisible] = useState(false);
+  const [moveModalVisible, setMoveModalVisible] = useState(false);
 
   useEffect(() => {
     if (route?.params?.category) {
@@ -35,15 +69,18 @@ export const DocumentsListScreen: React.FC<{ navigation: any; route?: any }> = (
   }, [route?.params?.category]);
 
   const fetchDocs = useCallback(async () => {
+    // 1. Sync any pending offline/scanned documents to backend server
+    try {
+      await documentService.syncOfflineDocuments();
+    } catch {}
+
     let localDocs: DocumentItem[] = [];
     try {
       const cached = await AsyncStorage.getItem('@fic_locker_offline_docs');
       if (cached) {
         localDocs = JSON.parse(cached);
       }
-    } catch {
-      // ignore
-    }
+    } catch {}
 
     let serverDocs: DocumentItem[] = [];
     try {
@@ -92,14 +129,15 @@ export const DocumentsListScreen: React.FC<{ navigation: any; route?: any }> = (
       );
     }
 
-    // Filter by search query if typed
+    // Filter by search query including OCR text
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       merged = merged.filter(
         (d) =>
           d.name.toLowerCase().includes(q) ||
           d.category?.toLowerCase().includes(q) ||
-          (d.tags || []).some((t) => t.toLowerCase().includes(q))
+          (d.tags || []).some((t) => t.toLowerCase().includes(q)) ||
+          (d.ocrText || '').toLowerCase().includes(q)
       );
     }
 
@@ -109,8 +147,28 @@ export const DocumentsListScreen: React.FC<{ navigation: any; route?: any }> = (
       merged = merged.filter((d) => (d.category || '').trim().toLowerCase() === catLower);
     }
 
+    // Apply Sorting
+    merged.sort((a, b) => {
+      switch (sortOption) {
+        case 'date_desc':
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        case 'date_asc':
+          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        case 'name_asc':
+          return a.name.localeCompare(b.name);
+        case 'name_desc':
+          return b.name.localeCompare(a.name);
+        case 'size_desc':
+          return (b.fileSizeBytes || 0) - (a.fileSizeBytes || 0);
+        case 'size_asc':
+          return (a.fileSizeBytes || 0) - (b.fileSizeBytes || 0);
+        default:
+          return 0;
+      }
+    });
+
     setDocuments(merged);
-  }, [activeTab, search, selectedCategory]);
+  }, [activeTab, search, selectedCategory, sortOption]);
 
   useFocusEffect(
     useCallback(() => {
@@ -128,6 +186,48 @@ export const DocumentsListScreen: React.FC<{ navigation: any; route?: any }> = (
     setRefreshing(false);
   };
 
+  const handleDocumentLongPress = (item: DocumentItem) => {
+    setSelectedDocForAction(item);
+    Alert.alert(item.name, 'Choose an action for this document:', [
+      {
+        text: '✏️ Rename',
+        onPress: () => setRenameModalVisible(true),
+      },
+      {
+        text: '📁 Move to Folder',
+        onPress: () => setMoveModalVisible(true),
+      },
+      {
+        text: '🗑️ Delete',
+        style: 'destructive',
+        onPress: () => {
+          Alert.alert('Delete Document', `Permanently delete "${item.name}"?`, [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Delete',
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  await documentService.deleteDocument(item._id);
+                } catch {}
+                try {
+                  const cached = await AsyncStorage.getItem('@fic_locker_offline_docs');
+                  if (cached) {
+                    const list: DocumentItem[] = JSON.parse(cached);
+                    const updated = list.filter((d) => d._id !== item._id && d.name !== item.name);
+                    await AsyncStorage.setItem('@fic_locker_offline_docs', JSON.stringify(updated));
+                  }
+                } catch {}
+                fetchDocs();
+              },
+            },
+          ]);
+        },
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
   const renderItem = ({ item }: { item: DocumentItem }) => {
     const isPdf = item.fileType === 'pdf';
     const thumbUri = item.localUri || item.thumbnailUrl;
@@ -135,16 +235,33 @@ export const DocumentsListScreen: React.FC<{ navigation: any; route?: any }> = (
       <TouchableOpacity
         style={[styles.docCard, isGridView ? styles.gridCard : styles.listCard]}
         onPress={() => navigation.navigate('DocumentDetail', { document: item })}
+        onLongPress={() => handleDocumentLongPress(item)}
         activeOpacity={0.8}
       >
-        <View style={[styles.cardThumb, { backgroundColor: isPdf ? '#FEE2E2' : '#DBEAFE', overflow: 'hidden' }]}>
+        <View
+          style={[
+            styles.cardThumb,
+            { backgroundColor: isPdf ? '#FEE2E2' : '#DBEAFE', overflow: 'hidden' },
+          ]}
+        >
           {thumbUri ? (
             <Image source={{ uri: thumbUri }} style={styles.thumbImage} resizeMode="cover" />
           ) : (
-            <Text style={[styles.thumbText, { color: isPdf ? colors.pdfRed : colors.imageBlue }]}>
+            <Text
+              style={[
+                styles.thumbText,
+                { color: isPdf ? colors.pdfRed : colors.imageBlue },
+              ]}
+            >
               {item.fileType.toUpperCase()}
             </Text>
           )}
+
+          {item.ocrText ? (
+            <View style={styles.ocrChipBadge}>
+              <Text style={styles.ocrChipBadgeText}>OCR</Text>
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.cardInfo}>
@@ -164,7 +281,25 @@ export const DocumentsListScreen: React.FC<{ navigation: any; route?: any }> = (
       {/* Top Header */}
       <View style={styles.header}>
         <Text style={styles.title}>My Documents</Text>
+
         <View style={styles.headerActions}>
+          {/* Search Shortcut */}
+          <TouchableOpacity
+            style={styles.actionBtn}
+            onPress={() => navigation.navigate('Search')}
+          >
+            <Text style={styles.actionIcon}>🔍</Text>
+          </TouchableOpacity>
+
+          {/* Sort Selector */}
+          <TouchableOpacity
+            style={styles.actionBtn}
+            onPress={() => setSortModalVisible(true)}
+          >
+            <Text style={styles.actionIcon}>⇅</Text>
+          </TouchableOpacity>
+
+          {/* Grid / List Toggle */}
           <TouchableOpacity
             style={styles.actionBtn}
             onPress={() => setIsGridView(!isGridView)}
@@ -174,7 +309,7 @@ export const DocumentsListScreen: React.FC<{ navigation: any; route?: any }> = (
         </View>
       </View>
 
-      {/* Filter Tabs */}
+      {/* Filter Tabs & Active Sort Tag */}
       <View style={styles.tabsContainer}>
         {TABS.map((tab) => {
           const isSelected = activeTab === tab;
@@ -188,6 +323,14 @@ export const DocumentsListScreen: React.FC<{ navigation: any; route?: any }> = (
             </TouchableOpacity>
           );
         })}
+      </View>
+
+      {/* Active Filter & Sort Info Bar */}
+      <View style={styles.infoStrip}>
+        <Text style={styles.infoStripText}>
+          Sort: <Text style={{ color: colors.primary, fontWeight: '700' }}>{SORT_LABELS[sortOption]}</Text>
+        </Text>
+        <Text style={styles.infoStripText}>{documents.length} item(s)</Text>
       </View>
 
       {/* Active Category Filter Banner */}
@@ -215,24 +358,73 @@ export const DocumentsListScreen: React.FC<{ navigation: any; route?: any }> = (
         data={documents}
         keyExtractor={(item) => item._id}
         renderItem={renderItem}
-        contentContainerStyle={[styles.listContainer, documents.length === 0 && styles.listContainerEmpty]}
+        contentContainerStyle={[
+          styles.listContainer,
+          documents.length === 0 && styles.listContainerEmpty,
+        ]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyIcon}>📄</Text>
-            <Text style={styles.emptyTitle}>No Documents Yet</Text>
+            <Text style={styles.emptyIcon}>📂</Text>
+            <Text style={styles.emptyTitle}>No Documents Found</Text>
             <Text style={styles.emptySubtitle}>
-              You haven't added any documents in this view. Tap below to scan or upload a document.
+              Scan new pages or upload existing files to store them securely.
             </Text>
-            <TouchableOpacity
-              style={styles.emptyBtn}
-              onPress={() => navigation.navigate('UploadDocument')}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.emptyBtnText}>+ Upload Document</Text>
-            </TouchableOpacity>
           </View>
         }
+      />
+
+      {/* Sort Selection Modal */}
+      <Modal
+        visible={sortModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setSortModalVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.sortOverlay}
+          activeOpacity={1}
+          onPress={() => setSortModalVisible(false)}
+        >
+          <View style={styles.sortCard}>
+            <Text style={styles.sortTitle}>Sort Documents</Text>
+
+            {(Object.keys(SORT_LABELS) as SortOption[]).map((key) => {
+              const isSelected = sortOption === key;
+              return (
+                <TouchableOpacity
+                  key={key}
+                  style={[styles.sortRow, isSelected && styles.sortRowActive]}
+                  onPress={() => {
+                    setSortOption(key);
+                    setSortModalVisible(false);
+                  }}
+                >
+                  <Text style={[styles.sortLabel, isSelected && styles.sortLabelActive]}>
+                    {SORT_LABELS[key]}
+                  </Text>
+                  {isSelected && <Text style={styles.sortCheck}>✓</Text>}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Rename Modal */}
+      <RenameDocumentModal
+        visible={renameModalVisible}
+        document={selectedDocForAction}
+        onSuccess={() => fetchDocs()}
+        onClose={() => setRenameModalVisible(false)}
+      />
+
+      {/* Move Modal */}
+      <MoveDocumentModal
+        visible={moveModalVisible}
+        document={selectedDocForAction}
+        onSuccess={() => fetchDocs()}
+        onClose={() => setMoveModalVisible(false)}
       />
     </View>
   );
@@ -249,7 +441,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingTop: 50,
-    paddingBottom: 16,
+    paddingBottom: 14,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
   },
   title: {
     fontSize: 22,
@@ -258,158 +453,211 @@ const styles = StyleSheet.create({
   },
   headerActions: {
     flexDirection: 'row',
+    gap: 8,
   },
   actionBtn: {
-    padding: 6,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#F4F4FA',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   actionIcon: {
-    fontSize: 20,
+    fontSize: 16,
     color: colors.text,
   },
   tabsContainer: {
     flexDirection: 'row',
     paddingHorizontal: 20,
-    marginBottom: 12,
-  },
-  categoryFilterBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#EEF2FF',
-    marginHorizontal: 16,
-    marginBottom: 12,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: '#C7D2FE',
-  },
-  categoryFilterText: {
-    fontSize: typography.fontSizes.sm,
-    color: '#3730A3',
-  },
-  categoryFilterHighlight: {
-    fontWeight: typography.fontWeights.bold,
-    color: colors.primary,
-  },
-  clearCategoryBtn: {
-    paddingVertical: 2,
-    paddingHorizontal: 8,
+    paddingVertical: 10,
     backgroundColor: '#FFFFFF',
-    borderRadius: borderRadius.sm,
-  },
-  clearCategoryBtnText: {
-    fontSize: typography.fontSizes.xs,
-    color: colors.primary,
-    fontWeight: typography.fontWeights.bold,
+    gap: 8,
   },
   tabBtn: {
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: borderRadius.pill,
     backgroundColor: '#F3F4F6',
-    marginRight: 10,
   },
   tabBtnActive: {
     backgroundColor: colors.primary,
   },
   tabText: {
-    fontSize: typography.fontSizes.sm,
+    fontSize: 13,
+    fontWeight: '600',
     color: colors.textSecondary,
-    fontWeight: typography.fontWeights.medium,
   },
   tabTextActive: {
     color: '#FFFFFF',
-    fontWeight: typography.fontWeights.bold,
+    fontWeight: '700',
+  },
+  infoStrip: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 6,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  infoStripText: {
+    fontSize: 11,
+    color: colors.textSecondary,
+  },
+  categoryFilterBanner: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#EDE9FE',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  categoryFilterText: {
+    fontSize: 12,
+    color: colors.primaryDark,
+  },
+  categoryFilterHighlight: {
+    fontWeight: 'bold',
+  },
+  clearCategoryBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  clearCategoryBtnText: {
+    fontSize: 11,
+    color: colors.primary,
+    fontWeight: 'bold',
   },
   listContainer: {
-    paddingHorizontal: 16,
-    paddingBottom: 30,
+    padding: 14,
+  },
+  listContainerEmpty: {
+    flex: 1,
+    justifyContent: 'center',
   },
   docCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: '#FFFFFF',
     borderRadius: borderRadius.lg,
-    padding: 14,
-    marginBottom: 14,
-    ...shadows.card,
+    padding: 10,
+    ...shadows.subtle,
   },
   gridCard: {
-    flex: 0.48,
-    marginHorizontal: '1%',
-    alignItems: 'center',
+    flex: 0.5,
+    margin: 6,
   },
   listCard: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 10,
   },
   cardThumb: {
-    width: 64,
-    height: 64,
-    borderRadius: 12,
-    alignItems: 'center',
+    width: '100%',
+    height: 120,
+    borderRadius: borderRadius.md,
     justifyContent: 'center',
-    marginBottom: 8,
+    alignItems: 'center',
+    position: 'relative',
   },
   thumbImage: {
     width: '100%',
     height: '100%',
-    borderRadius: 12,
   },
   thumbText: {
-    fontSize: 14,
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  ocrChipBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    backgroundColor: colors.primary,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  ocrChipBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 8,
     fontWeight: 'bold',
   },
   cardInfo: {
-    alignItems: 'center',
+    marginTop: 8,
   },
   docName: {
-    fontSize: typography.fontSizes.sm,
-    fontWeight: typography.fontWeights.bold,
+    fontSize: 13,
+    fontWeight: typography.fontWeights.semiBold,
     color: colors.text,
-    textAlign: 'center',
   },
   docMeta: {
     fontSize: 11,
     color: colors.textMuted,
-    marginTop: 4,
-  },
-  listContainerEmpty: {
-    flexGrow: 1,
-    justifyContent: 'center',
+    marginTop: 2,
   },
   emptyContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 60,
-    paddingHorizontal: 24,
+    padding: 40,
   },
   emptyIcon: {
-    fontSize: 52,
-    marginBottom: 16,
+    fontSize: 48,
+    marginBottom: 12,
   },
   emptyTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: 'bold',
     color: colors.text,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   emptySubtitle: {
     fontSize: 13,
-    color: colors.textSecondary,
+    color: colors.textMuted,
     textAlign: 'center',
-    lineHeight: 19,
-    marginBottom: 24,
+    lineHeight: 18,
   },
-  emptyBtn: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: 22,
+  sortOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  sortCard: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: borderRadius.xl,
+    padding: 20,
+    elevation: 8,
+  },
+  sortTitle: {
+    fontSize: 17,
+    fontWeight: typography.fontWeights.bold,
+    color: colors.text,
+    marginBottom: 14,
+  },
+  sortRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingVertical: 12,
-    borderRadius: borderRadius.pill,
+    paddingHorizontal: 10,
+    borderRadius: borderRadius.md,
   },
-  emptyBtnText: {
-    color: '#FFFFFF',
-    fontWeight: 'bold',
+  sortRowActive: {
+    backgroundColor: '#EDE9FE',
+  },
+  sortLabel: {
     fontSize: 14,
+    color: colors.text,
+    fontWeight: '500',
+  },
+  sortLabelActive: {
+    color: colors.primary,
+    fontWeight: '700',
+  },
+  sortCheck: {
+    fontSize: 16,
+    color: colors.primary,
+    fontWeight: 'bold',
   },
 });
-

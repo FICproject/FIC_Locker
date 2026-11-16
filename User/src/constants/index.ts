@@ -7,10 +7,10 @@ export function setApiHostOverride(host: string) {
 }
 
 export const DEV_CANDIDATE_HOSTS = [
+  '192.168.0.175',
+  '10.0.2.2',
   '127.0.0.1',
   'localhost',
-  '192.168.0.128',
-  '10.0.2.2',
 ];
 
 export function resolveDevHost(): string {
@@ -22,7 +22,7 @@ export function resolveDevHost(): string {
       return match[1];
     }
   }
-  return Platform.OS === 'android' ? '127.0.0.1' : 'localhost';
+  return Platform.OS === 'android' ? '192.168.0.175' : 'localhost';
 }
 
 export const API_CONFIG = {
@@ -52,6 +52,8 @@ export const API_CONFIG = {
     DOCUMENT_ARCHIVE: (id: string) => `/documents/${id}/archive`,
     DOCUMENT_RESTORE: (id: string) => `/documents/${id}/restore`,
     DOCUMENT_MOVE: (id: string) => `/documents/${id}/move`,
+    DOCUMENT_RENAME: (id: string) => `/documents/${id}/rename`,
+    DOCUMENT_OCR: (id: string) => `/documents/${id}/ocr`,
 
     // Categories & Folders
     CATEGORIES: '/categories',
