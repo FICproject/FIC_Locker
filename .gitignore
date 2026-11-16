@@ -26,6 +26,8 @@ npm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+nul
+**/nul
 
 # React Native / Mobile
 .gradle/

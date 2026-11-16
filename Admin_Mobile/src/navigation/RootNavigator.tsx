@@ -11,6 +11,7 @@ import { ResetPasswordScreen } from '../features/auth/ResetPasswordScreen';
 import { DashboardScreen } from '../features/dashboard/DashboardScreen';
 import { UsersScreen } from '../features/users/UsersScreen';
 import { UserDetailScreen } from '../features/users/UserDetailScreen';
+import { UserDocumentsScreen } from '../features/users/UserDocumentsScreen';
 import { DocumentsScreen } from '../features/documents/DocumentsScreen';
 import { DocumentDetailScreen } from '../features/documents/DocumentDetailScreen';
 import { SupportScreen } from '../features/support/SupportScreen';
@@ -47,6 +48,8 @@ function UsersNavigator() {
     <UsersStack.Navigator id="users-nav" screenOptions={headerOptions}>
       <UsersStack.Screen name="UsersList" component={UsersScreen} options={{ title: 'Users' }} />
       <UsersStack.Screen name="UserDetail" component={UserDetailScreen} options={{ title: 'User Details' }} />
+      <UsersStack.Screen name="UserDocuments" component={UserDocumentsScreen} options={{ title: 'User Documents' }} />
+      <UsersStack.Screen name="DocumentDetail" component={DocumentDetailScreen} options={{ title: 'Document Details' }} />
     </UsersStack.Navigator>
   );
 }

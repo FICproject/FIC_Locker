@@ -71,9 +71,9 @@ export const adminMobileApi = {
   },
 
   documents: {
-    list: async (params: { search?: string; status?: string }) => {
+    list: async (params: { search?: string; status?: string; userId?: string; categoryId?: string; page?: number; limit?: number }) => {
       const res = await mobileApiClient.get<ApiResponse<AdminDocumentRecord[]>>('/admin/documents', {
-        params: { ...params, limit: 25 },
+        params: { limit: 25, ...params },
       });
       return res.data.data;
     },

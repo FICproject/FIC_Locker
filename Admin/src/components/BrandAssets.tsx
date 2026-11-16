@@ -10,13 +10,13 @@ export interface FicLogoProps {
 
 /**
  * Geometric vector emblem of Forge India Connect (FIC):
- * - Blue outer corner bracket (#0047BA)
- * - Golden yellow box with elephant silhouette (#F7BA1E)
- * - Golden yellow base triangle / pyramid (#F7BA1E)
+ * - Outer corner L-bracket: #FFFFFF when light=true, #0646A0 when light=false
+ * - Golden yellow box with elephant silhouette: #FFC400
+ * - Golden yellow base triangle / pyramid: #FFC400
  */
 export function FicEmblem({
   size = 'md',
-  light = false,
+  light = true,
   className = '',
 }: {
   size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
@@ -34,22 +34,23 @@ export function FicEmblem({
       ? 'w-16 h-16'
       : 'w-10 h-10';
 
-  const blueFill = light ? '#FFFFFF' : '#0047BA';
-  const goldFill = '#F7BA1E';
+  const bracketFill = light ? '#FFFFFF' : '#0646A0';
+  const goldFill = '#FFC400';
+  const elephantFill = light ? '#073B83' : '#FFFFFF';
 
   return (
     <svg viewBox="0 0 100 100" fill="none" className={`${dim} ${className}`} aria-label="Forge India Connect Logo">
       {/* Outer L bracket */}
       <path
         d="M 24 20 L 74 20 L 66 30 L 36 30 L 36 78 L 24 78 Z"
-        fill={blueFill}
+        fill={bracketFill}
       />
       {/* Yellow box in top-right */}
       <rect x="44" y="34" width="28" height="19" rx="3.5" fill={goldFill} />
-      {/* Blue elephant silhouette inside the yellow box */}
+      {/* Elephant silhouette inside the yellow box */}
       <path
         d="M 64.5 45.2 c -0.6 -1.6 -1.9 -2.5 -3.6 -2.5 c -1.2 0 -2.3 0.6 -2.8 1.5 c -0.6 -0.3 -1.4 -0.5 -2.2 -0.5 c -1.8 0 -3.3 1.2 -3.6 2.8 c -0.4 0.2 -0.9 0.6 -0.9 1.4 l 0 4.2 l 2.2 0 l 0 -2.5 c 0.5 0 1.2 0 1.8 0 l 0 2.5 l 2 0 l 0 -2.5 c 0.6 0 1.2 0 1.8 0 l 0 2.5 l 2 0 l 0 -2.8 c 0.8 0 1.5 -0.5 1.8 -1.2 c 0.8 0.4 1.5 0.8 2 1.5 l 1.4 -1 c -0.7 -0.9 -1.4 -1.4 -2 -1.8 c 0.5 -0.6 0.8 -1.2 0.8 -1.9 c 0 -0.8 -0.4 -1.5 -0.8 -1.8 l -0.8 0.8 c 0.3 0.3 0.4 0.6 0.4 1 c 0 0.8 -0.6 1.4 -1.4 1.4 c -0.3 0 -0.6 -0.1 -0.8 -0.3 Z"
-        fill={light ? '#FFFFFF' : '#0047BA'}
+        fill={elephantFill}
       />
       {/* Golden yellow pyramid at base */}
       <polygon points="32,78 76,78 54,52" fill={goldFill} />
@@ -59,7 +60,6 @@ export function FicEmblem({
 
 /**
  * High-fidelity logo badge from the uploaded brand design.
- * Tries the high-res image /fic-logo.jpg first, falls back smoothly to vector badge.
  */
 export function FicLogoBadge({
   size = 'md',
@@ -89,24 +89,53 @@ export function FicLogoBadge({
         src="/fic-logo.jpg"
         alt="Forge India Connect"
         onError={() => setImgFailed(true)}
-        className={`${dim} rounded-full object-cover shadow-lg border-2 border-white/80 shrink-0 ${className}`}
+        className={`${dim} rounded-full object-cover shadow-sm border-2 border-white/80 shrink-0 ${className}`}
       />
     );
   }
 
   return (
     <div
-      className={`${dim} rounded-full bg-[#FFC72C] flex items-center justify-center p-1.5 shadow-lg shrink-0 ${className}`}
+      className={`${dim} rounded-full bg-[#FFC400] flex items-center justify-center p-1.5 shadow-sm shrink-0 ${className}`}
     >
-      <div className="w-full h-full rounded-full bg-white flex items-center justify-center p-1 shadow-inner">
-        <FicEmblem size={size === '2xl' ? 'xl' : size === 'xl' ? 'lg' : 'md'} />
+      <div className="w-full h-full rounded-full bg-white flex items-center justify-center p-1">
+        <FicEmblem size={size === '2xl' ? 'xl' : size === 'xl' ? 'lg' : 'md'} light={false} />
       </div>
     </div>
   );
 }
 
 /**
- * Wordmark: "FIC Locker" styled with brand colors (Blue #0047BA and Gold #F7BA1E).
+ * Official circular Forge India Connect brand logo for Sidebar Header.
+ * Uses the exact brand badge uploaded by the user.
+ */
+export function SidebarLogoBadge({ className = '' }: { className?: string }) {
+  const [imgFailed, setImgFailed] = useState(false);
+
+  if (!imgFailed) {
+    return (
+      <div className={`relative flex items-center justify-center p-1 rounded-full bg-white shadow-md border-2 border-white/90 ${className}`}>
+        <img
+          src="/assets/forge-india-circle-logo.png"
+          alt="Forge India Connect"
+          onError={() => setImgFailed(true)}
+          className="w-16 h-16 rounded-full object-contain"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`w-16 h-16 rounded-full bg-white border-2 border-white/90 flex items-center justify-center p-2 shadow-md ${className}`}
+    >
+      <FicEmblem size="lg" light={false} />
+    </div>
+  );
+}
+
+/**
+ * Wordmark: "FIC Locker" styled with brand colors.
  */
 export function FicWordmark({
   light = false,
@@ -126,13 +155,13 @@ export function FicWordmark({
   return (
     <div className={`flex flex-col ${className}`}>
       <div className={`font-black tracking-tight leading-tight ${textSize}`}>
-        <span className={light ? 'text-white' : 'text-[#0047BA]'}>FIC </span>
-        <span className="text-[#F7BA1E]">Locker</span>
+        <span className={light ? 'text-white' : 'text-[#0646A0]'}>FIC </span>
+        <span className="text-[#FFC400]">Locker</span>
       </div>
       {subtitle && (
         <div
           className={`font-semibold tracking-wider uppercase mt-1 ${subSize} ${
-            light ? 'text-blue-200' : 'text-[#0047BA]'
+            light ? 'text-blue-200' : 'text-[#0646A0]'
           }`}
         >
           {subtitle}
@@ -142,10 +171,6 @@ export function FicWordmark({
   );
 }
 
-/**
- * Drop-in replacement for the legacy DocScanLogo so all existing views inherit
- * the Forge India Connect branding.
- */
 export function DocScanLogo({
   light = false,
   size = 'md',
@@ -156,49 +181,110 @@ export function DocScanLogo({
   return <FicEmblem size={size} light={light} />;
 }
 
+/**
+ * High-definition 3D illustration for Welcome Banner.
+ * Uses 2x supersampled artwork with a smooth gradient alpha mask on the left
+ * to ensure 100% seamless blending into the white card with zero hard lines.
+ */
 export function WelcomeBannerIllustration() {
   return (
-    <svg viewBox="0 0 280 130" fill="none" className="w-64 h-28 shrink-0" aria-hidden="true">
-      <path
-        d="M0 112 C50 75, 110 120, 175 88 C220 65, 250 92, 280 76 L280 130 L0 130 Z"
-        fill="url(#waveFicBlue)"
-        opacity="0.9"
+    <div className="relative w-full h-full min-h-[160px] flex items-center justify-end select-none pointer-events-none overflow-hidden">
+      <img
+        src="/assets/welcome-banner-hd.jpg"
+        alt="Platform Overview"
+        className="h-full w-full object-cover object-right"
+        style={{
+          maskImage: 'linear-gradient(to right, transparent 0%, black 15%, black 100%)',
+          WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 15%, black 100%)',
+        }}
       />
-      <path
-        d="M145 130 C190 95, 235 112, 280 86 L280 130 Z"
-        fill="url(#waveFicGold)"
-        opacity="0.9"
-      />
-      {/* Back documents */}
-      <rect x="115" y="18" width="44" height="54" rx="6" fill="#FFFFFF" stroke="#FDE68A" strokeWidth="1.5" transform="rotate(-8 115 18)" />
-      <rect x="148" y="22" width="44" height="54" rx="6" fill="#FFFDF5" stroke="#BFDBFE" strokeWidth="1.5" transform="rotate(6 148 22)" />
-      <path d="M158 38h20M158 46h16M158 54h12" stroke="#0047BA" strokeWidth="2" strokeLinecap="round" />
-      {/* Folder */}
-      <path d="M108 58c0-4 3-7 7-7h18l6 6h36c4 0 7 3 7 7v24c0 4-3 7-7 7h-60c-4 0-7-3-7-7V58Z" fill="#EFF6FF" stroke="#0047BA" strokeWidth="1.5" />
-      {/* Cloud upload badge */}
-      <path
-        d="M196 86h46a14 14 0 0 0 2.5-27.78A19 19 0 0 0 207.8 53.6 15 15 0 0 0 196 86Z"
-        fill="#0047BA"
-      />
-      <circle cx="220" cy="68" r="11" fill="#F7BA1E" />
-      <path d="M220 73V63m0 0-4 4m4-4 4 4" stroke="#0047BA" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-      <defs>
-        <linearGradient id="waveFicBlue" x1="0" y1="70" x2="280" y2="130" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#0047BA" />
-          <stop offset="1" stopColor="#0284C7" />
-        </linearGradient>
-        <linearGradient id="waveFicGold" x1="150" y1="90" x2="280" y2="130" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#F7BA1E" />
-          <stop offset="1" stopColor="#FFD233" />
-        </linearGradient>
-      </defs>
-    </svg>
+    </div>
+  );
+}
+
+export function SecurityCardIllustration() {
+  const [imgFailed, setImgFailed] = useState(false);
+
+  return (
+    <div className="absolute right-0 top-0 bottom-0 w-56 sm:w-64 md:w-72 pointer-events-none overflow-hidden select-none flex items-center justify-end">
+      {!imgFailed ? (
+        <img
+          src="/assets/security-card-hd.jpg"
+          alt="Platform Security & Reliability"
+          onError={() => setImgFailed(true)}
+          className="h-full w-full object-cover object-right"
+          style={{
+            maskImage: 'linear-gradient(to right, transparent 0%, black 15%, black 100%)',
+            WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 15%, black 100%)',
+          }}
+        />
+      ) : (
+        <svg
+          viewBox="0 0 240 170"
+          fill="none"
+          className="w-full h-full object-cover object-right"
+          preserveAspectRatio="xMidYMid meet"
+          aria-hidden="true"
+        >
+          <defs>
+            <linearGradient id="secCardYellow" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="#FFD54F" />
+              <stop offset="100%" stopColor="#FFB300" />
+            </linearGradient>
+            <linearGradient id="secCardBlue" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="#0646A0" />
+              <stop offset="100%" stopColor="#032D6B" />
+            </linearGradient>
+            <linearGradient id="shieldFaceGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="#FFFFFF" />
+              <stop offset="100%" stopColor="#EFF6FF" />
+            </linearGradient>
+            <linearGradient id="shieldBorderGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="#0852B8" />
+              <stop offset="100%" stopColor="#042F6E" />
+            </linearGradient>
+            <filter id="shieldShadowFilter" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="6" stdDeviation="7" floodColor="#0A2540" floodOpacity="0.16" />
+            </filter>
+          </defs>
+
+          {/* Dynamic sweeping wave ribbons on the bottom-right corner */}
+          <path
+            d="M 120 170 C 145 115 180 60 240 30 L 240 170 Z"
+            fill="url(#secCardYellow)"
+          />
+          <path
+            d="M 145 170 C 185 135 215 90 240 65 L 240 170 Z"
+            fill="url(#secCardBlue)"
+          />
+
+          {/* Fully intact prominent 3D Shield with Checkmark */}
+          <g transform="translate(62, 42)" filter="url(#shieldShadowFilter)">
+            <path
+              d="M 32 0 C 20 0 3 6 0 8 C 0 34 10 56 32 70 C 54 56 64 34 64 8 C 61 6 44 0 32 0 Z"
+              fill="url(#shieldFaceGrad)"
+              stroke="url(#shieldBorderGrad)"
+              strokeWidth="3.6"
+              strokeLinejoin="round"
+            />
+            <path
+              d="M 19 35 L 29 45 L 46 25"
+              fill="none"
+              stroke="#0646A0"
+              strokeWidth="4.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </g>
+        </svg>
+      )}
+    </div>
   );
 }
 
 export function SparklineWave({ color }: { color: string }) {
   return (
-    <svg viewBox="0 0 90 26" fill="none" className="w-20 h-6" aria-hidden="true">
+    <svg viewBox="0 0 90 26" fill="none" className="w-20 h-6 shrink-0" aria-hidden="true">
       <path
         d="M2 22 C16 20, 24 12, 38 15 C52 18, 62 7, 74 9 C81 10, 85 5, 88 3"
         stroke={color}

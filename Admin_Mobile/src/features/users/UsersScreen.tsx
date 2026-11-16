@@ -95,19 +95,41 @@ export function UsersScreen({ navigation }: Props) {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load('refresh')} />}
           ListEmptyComponent={<EmptyView title="No matching users found" />}
           renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.card}
-              onPress={() => navigation.navigate('UserDetail', { userId: item._id })}
-            >
-              <View style={styles.rowBetween}>
-                <Text style={styles.name}>{item.fullName}</Text>
-                <StatusPill status={item.status} />
+            <View style={styles.card}>
+              <TouchableOpacity
+                onPress={() => navigation.navigate('UserDetail', { userId: item._id })}
+              >
+                <View style={styles.rowBetween}>
+                  <Text style={styles.name}>{item.fullName}</Text>
+                  <StatusPill status={item.status} />
+                </View>
+                <Text style={styles.email}>{item.email}</Text>
+                <Text style={styles.meta}>
+                  {item.planName || 'Free'} • {item.totalDocuments} docs • {formatBytes(item.storageUsedBytes)}
+                </Text>
+              </TouchableOpacity>
+
+              <View style={styles.cardActions}>
+                <TouchableOpacity
+                  style={styles.actionBtnDocs}
+                  onPress={() =>
+                    navigation.navigate('UserDocuments', {
+                      userId: item._id,
+                      userName: item.fullName,
+                    })
+                  }
+                >
+                  <Text style={styles.actionBtnDocsText}>📄 View Documents ({item.totalDocuments || 0})</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.actionBtnManage}
+                  onPress={() => navigation.navigate('UserDetail', { userId: item._id })}
+                >
+                  <Text style={styles.actionBtnManageText}>Manage</Text>
+                </TouchableOpacity>
               </View>
-              <Text style={styles.email}>{item.email}</Text>
-              <Text style={styles.meta}>
-                {item.planName || 'Free'} • {item.totalDocuments} docs • {formatBytes(item.storageUsedBytes)}
-              </Text>
-            </TouchableOpacity>
+            </View>
           )}
         />
       )}
@@ -138,4 +160,29 @@ const styles = StyleSheet.create({
   name: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
   email: { fontSize: 13, color: '#64748B' },
   meta: { fontSize: 12, color: '#475569', marginTop: 2 },
+  cardActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  actionBtnDocs: {
+    flex: 1,
+    backgroundColor: '#EEF5FF',
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  actionBtnDocsText: { fontSize: 12, fontWeight: '700', color: '#0A3A8E' },
+  actionBtnManage: {
+    backgroundColor: '#F1F5F9',
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  actionBtnManageText: { fontSize: 12, fontWeight: '600', color: '#334155' },
 });

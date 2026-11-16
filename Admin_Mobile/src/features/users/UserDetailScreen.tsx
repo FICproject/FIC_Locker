@@ -11,7 +11,7 @@ import { useMobileLiveSync } from '../../hooks/useMobileLiveSync';
 
 type Props = NativeStackScreenProps<UsersStackParamList, 'UserDetail'>;
 
-export function UserDetailScreen({ route }: Props) {
+export function UserDetailScreen({ route, navigation }: Props) {
   const { userId } = route.params;
   const [user, setUser] = useState<AdminUserDetail | null>(null);
   const [reason, setReason] = useState('');
@@ -79,6 +79,18 @@ export function UserDetailScreen({ route }: Props) {
           Subscription: {user.subscription?.planName || user.planName || 'Free'}{' '}
           {user.subscription ? `(${user.subscription.status})` : ''}
         </Text>
+
+        <TouchableOpacity
+          style={styles.viewDocsBtn}
+          onPress={() =>
+            (navigation as any).navigate('UserDocuments', {
+              userId: user._id,
+              userName: user.fullName,
+            })
+          }
+        >
+          <Text style={styles.viewDocsBtnText}>📄 View User Documents ({user.totalDocuments || 0})</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.card}>
@@ -126,4 +138,18 @@ const styles = StyleSheet.create({
   btnDanger: { backgroundColor: '#DC2626' },
   btnSuccess: { backgroundColor: '#059669' },
   btnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 14 },
+  viewDocsBtn: {
+    marginTop: 8,
+    backgroundColor: '#EEF5FF',
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  viewDocsBtnText: {
+    color: '#0A3A8E',
+    fontWeight: '700',
+    fontSize: 13,
+  },
 });

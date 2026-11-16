@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
@@ -46,11 +47,15 @@ export function LoginScreen({ navigation }: Props) {
     >
       <View style={styles.card}>
         <View style={styles.brandBox}>
-          <View style={styles.cloudMark}>
-            <Text style={styles.cloudMarkText}>☁</Text>
-          </View>
-          <Text style={styles.title}>FIC Locker</Text>
-          <Text style={styles.tagline}>Scan • Store • Access — Admin Mobile</Text>
+          <Image
+            source={require('../../assets/logo.png')}
+            style={styles.logoBadge}
+            resizeMode="contain"
+          />
+          <Text style={styles.title}>
+            FIC <Text style={{ color: '#FFC400' }}>LOCKER</Text>
+          </Text>
+          <Text style={styles.tagline}>Admin Mobile Console</Text>
         </View>
 
         {error ? (
@@ -103,16 +108,12 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#0A3A8E', justifyContent: 'center', padding: 20 },
   card: { backgroundColor: '#FFFFFF', borderRadius: 24, padding: 24 },
   brandBox: { alignItems: 'center', marginBottom: 22 },
-  cloudMark: {
-    width: 56,
-    height: 56,
-    borderRadius: 16,
-    backgroundColor: '#EEF5FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
+  logoBadge: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    marginBottom: 12,
   },
-  cloudMarkText: { fontSize: 28, color: '#1D63DC' },
   title: { fontSize: 23, fontWeight: '800', color: '#0F172A' },
   tagline: { fontSize: 12, color: '#1D63DC', fontWeight: '600', marginTop: 3 },
   errorBox: {

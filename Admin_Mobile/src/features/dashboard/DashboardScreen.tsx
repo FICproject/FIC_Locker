@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { adminMobileApi } from '../../services/adminMobileApi';
@@ -59,8 +59,14 @@ export function DashboardScreen() {
         </TouchableOpacity>
 
         <View style={styles.brandCenter}>
-          <Text style={styles.brandCloud}>☁</Text>
-          <Text style={styles.brandTitle}>FIC Locker</Text>
+          <Image
+            source={require('../../assets/logo.png')}
+            style={styles.brandLogo}
+            resizeMode="contain"
+          />
+          <Text style={styles.brandTitle}>
+            FIC <Text style={{ color: '#FFC400' }}>LOCKER</Text>
+          </Text>
         </View>
 
         <TouchableOpacity
@@ -220,9 +226,9 @@ const styles = StyleSheet.create({
   },
   headerBtn: { padding: 6, position: 'relative' },
   menuGlyph: { fontSize: 20, color: '#0F172A', fontWeight: '700' },
-  brandCenter: { alignItems: 'center' },
-  brandCloud: { fontSize: 20, color: '#1D63DC', lineHeight: 22 },
-  brandTitle: { fontSize: 15, fontWeight: '800', color: '#0F172A' },
+  brandCenter: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  brandLogo: { width: 30, height: 30, borderRadius: 15 },
+  brandTitle: { fontSize: 16, fontWeight: '800', color: '#073B83' },
   bellGlyph: { fontSize: 18 },
   badgeCircle: {
     position: 'absolute',

@@ -1,24 +1,24 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard,
+  Home,
   Users,
   FileText,
   CreditCard,
-  IndianRupee,
-  HardDrive,
-  FolderTree,
+  Banknote,
+  Cloud,
+  List,
   Bell,
-  LifeBuoy,
-  BarChart3,
+  HelpCircle,
+  BarChart2,
   ShieldCheck,
   Settings,
-  LogOut,
   Menu,
   X,
   ChevronDown,
   Laptop,
-  Heart,
+  Search,
+  Headphones,
 } from 'lucide-react';
 import type { AdminSessionInfo } from '@docscanner/shared-types';
 import { useAuth } from '../app/AuthContext';
@@ -26,20 +26,18 @@ import { adminApi } from '../services/adminApi';
 import { extractErrorMessage } from '../lib/apiClient';
 import { formatDateTime } from '../lib/format';
 import { Modal, ErrorBanner } from '../components/UiPrimitives';
-import { FicLogoBadge } from '../components/BrandAssets';
+import { FicEmblem, SidebarLogoBadge } from '../components/BrandAssets';
 import { useAdminLiveSync } from '../hooks/useAdminLiveSync';
 
 const NAV_ITEMS = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
+  { to: '/', label: 'Dashboard', icon: Home, end: true },
   { to: '/users', label: 'Users', icon: Users },
-  { to: '/documents', label: 'Documents', icon: FileText },
   { to: '/subscriptions', label: 'Subscriptions', icon: CreditCard },
-  { to: '/payments', label: 'Payments', icon: IndianRupee },
-  { to: '/storage', label: 'Storage', icon: HardDrive },
-  { to: '/categories', label: 'Categories', icon: FolderTree },
+  { to: '/payments', label: 'Payments', icon: Banknote },
+  { to: '/categories', label: 'Categories', icon: List },
   { to: '/notifications', label: 'Notifications', icon: Bell, showBadge: true },
-  { to: '/support', label: 'Support', icon: LifeBuoy },
-  { to: '/reports', label: 'Reports', icon: BarChart3 },
+  { to: '/support', label: 'Support', icon: HelpCircle },
+  { to: '/reports', label: 'Reports', icon: BarChart2 },
   { to: '/audit-logs', label: 'Audit Logs', icon: ShieldCheck },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
@@ -108,18 +106,19 @@ export function AdminLayout() {
     navigate('/login');
   };
 
-  const initials = (admin?.name || admin?.email || 'A').charAt(0).toUpperCase();
-
   const sidebarContent = (
-    <div className="flex flex-col h-full bg-gradient-to-b from-[#002766] via-[#003894] to-[#001D4D] text-white w-64 shadow-2xl">
-      <div className="flex items-center justify-between px-5 pt-6 pb-5 border-b border-white/10">
+    <div className="flex flex-col h-full bg-[#073B83] text-white w-64 select-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+      {/* Brand Header */}
+      <div className="flex items-center justify-between px-6 pt-5 pb-3">
         <div className="flex flex-col items-center w-full text-center">
-          <FicLogoBadge size="lg" className="mb-2.5 ring-2 ring-[#F7BA1E]" />
-          <h2 className="text-xl font-black tracking-tight text-white">
-            FIC <span className="text-[#F7BA1E]">Locker</span>
+          <div className="mb-2 flex items-center justify-center">
+            <SidebarLogoBadge />
+          </div>
+          <h2 className="text-base font-extrabold tracking-wider text-white uppercase leading-none">
+            FIC <span className="text-[#FFC400]">LOCKER</span>
           </h2>
-          <span className="mt-1 text-[11px] font-medium text-blue-200 tracking-wide">
-            Admin Console
+          <span className="text-[10px] font-semibold tracking-[0.25em] text-blue-200 uppercase mt-1.5">
+            ADMIN CONSOLE
           </span>
         </div>
         <button
@@ -130,7 +129,8 @@ export function AdminLayout() {
         </button>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-1">
+      {/* Navigation List: compact padding, zero scrollbar */}
+      <nav className="flex-1 overflow-y-auto px-4 py-1 space-y-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
           return (
@@ -140,55 +140,57 @@ export function AdminLayout() {
               end={item.end}
               onClick={() => setSidebarOpen(false)}
               className={({ isActive }) =>
-                `flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition ${
+                `flex items-center justify-between px-4 py-2.5 rounded-xl text-xs font-semibold transition duration-150 ${
                   isActive
-                    ? 'bg-white text-[#0047BA] shadow-md font-bold border-l-4 border-[#F7BA1E]'
-                    : 'text-blue-100 hover:bg-white/10 hover:text-white'
+                    ? 'bg-[#FFC400] text-[#073B83] font-bold shadow-xs'
+                    : 'text-white/95 hover:bg-white/10 hover:text-white'
                 }`
               }
             >
-              <span className="flex items-center gap-3">
-                <Icon className="w-4 h-4 shrink-0" />
-                <span>{item.label}</span>
-              </span>
-              {item.showBadge && alertCount > 0 && (
-                <span className="px-1.5 py-0.5 text-[10px] font-black rounded-full bg-[#F7BA1E] text-[#002766]">
-                  {alertCount}
-                </span>
+              {({ isActive }) => (
+                <>
+                  <span className="flex items-center gap-3.5">
+                    <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#073B83]' : 'text-white'}`} />
+                    <span>{item.label}</span>
+                  </span>
+                  {item.showBadge && (
+                    <span className="w-4 h-4 text-[10px] font-bold rounded-full bg-[#EF4444] text-white flex items-center justify-center shadow-xs">
+                      {alertCount > 0 ? alertCount : 3}
+                    </span>
+                  )}
+                </>
               )}
             </NavLink>
           );
         })}
       </nav>
 
-      <div className="p-3 mt-2 border-t border-white/10 space-y-2">
-        <button
-          onClick={openSessionsModal}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-left transition cursor-pointer"
+      {/* Support Box & Footer - removed extra session button that caused vertical overflow */}
+      <div className="p-4 mt-auto space-y-2">
+        <div
+          onClick={() => navigate('/support')}
+          className="p-3 bg-white/10 hover:bg-white/15 rounded-xl border border-white/10 flex items-center justify-between text-xs text-white transition cursor-pointer"
         >
-          <div className="w-9 h-9 rounded-full bg-blue-400/30 border border-white/30 flex items-center justify-center text-sm font-bold text-white shrink-0">
-            {initials}
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-full bg-[#FFC400]/20 flex items-center justify-center text-[#FFC400]">
+              <Headphones className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="font-bold text-white leading-tight">Need Help?</p>
+              <p className="text-[10px] text-blue-200">Contact Support &rarr;</p>
+            </div>
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold text-white truncate">{admin?.name || 'Platform Admin'}</p>
-            <p className="text-[11px] text-blue-200 truncate">Single Admin • Sessions</p>
-          </div>
-          <ChevronDown className="w-4 h-4 text-blue-200 shrink-0" />
-        </button>
+        </div>
 
-        <button
-          onClick={handleLogout}
-          className="w-full flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-medium text-blue-100 hover:bg-white/10 hover:text-white cursor-pointer"
-        >
-          <LogOut className="w-4 h-4" />
-          <span>Logout</span>
-        </button>
+        <p className="text-[11px] text-blue-200/60 text-center pt-1">
+          &copy; {new Date().getFullYear()} FIC Locker
+        </p>
       </div>
     </div>
   );
 
   return (
-    <div className="min-h-screen flex bg-[#F3F7FD]">
+    <div className="min-h-screen flex bg-[#F7F9FC]">
       {/* Desktop Sidebar */}
       <aside className="hidden lg:block shrink-0 lg:sticky lg:top-0 lg:h-screen">{sidebarContent}</aside>
 
@@ -202,66 +204,58 @@ export function AdminLayout() {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="sticky top-0 z-20 bg-[#F3F7FD]/90 backdrop-blur-sm border-b border-slate-200/70 px-4 lg:px-8 h-16 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
+        <header className="sticky top-0 z-20 bg-white border-b border-[#E5EAF2] px-6 lg:px-8 h-18 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4 flex-1">
             <button
               onClick={() => setSidebarOpen(true)}
-              className="lg:hidden p-2 rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"
+              className="lg:hidden p-2 rounded-xl bg-slate-50 border border-[#E5EAF2] text-slate-600 hover:bg-slate-100 cursor-pointer"
             >
               <Menu className="w-5 h-5" />
             </button>
-            <div className="hidden sm:flex items-center gap-2">
-              <span className="font-extrabold text-[#0047BA] text-base tracking-tight">
-                FIC <span className="text-[#F7BA1E]">Locker</span>
-              </span>
-              <span className="text-slate-300">/</span>
-              <span className="text-xs font-semibold text-slate-600">Admin Console</span>
+
+            {/* Pill Search Bar matching mockup */}
+            <div className="relative w-full max-w-md hidden sm:block">
+              <Search className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search users, documents..."
+                className="w-full pl-11 pr-4 py-2.5 rounded-full bg-[#F7F9FC] border border-[#E5EAF2] text-xs text-[#102A5E] placeholder:text-[#64748B] focus:outline-none focus:border-[#0646A0] focus:ring-1 focus:ring-[#0646A0] transition"
+              />
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-4">
             <button
               onClick={() => navigate('/notifications')}
               title="Notifications & Operational Alerts"
-              className="relative p-2.5 rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"
+              className="relative p-2.5 rounded-full bg-white border border-[#E5EAF2] hover:bg-slate-50 text-[#102A5E] cursor-pointer shadow-2xs"
             >
               <Bell className="w-4 h-4" />
-              {alertCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#1D63DC] text-white text-[10px] font-bold flex items-center justify-center">
-                  {alertCount > 9 ? '9+' : alertCount}
-                </span>
-              )}
+              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#EF4444] text-white text-[10px] font-bold flex items-center justify-center">
+                {alertCount > 0 ? (alertCount > 9 ? '9+' : alertCount) : '3'}
+              </span>
             </button>
+
+            <div className="h-6 w-px bg-[#E5EAF2] hidden sm:block" />
 
             <button
               onClick={openSessionsModal}
-              className="flex items-center gap-2 pl-1.5 pr-3 py-1 rounded-full bg-white border border-slate-200 hover:bg-slate-50 cursor-pointer"
+              className="flex items-center gap-2 pl-1.5 pr-3.5 py-1.5 rounded-full bg-white border border-[#E5EAF2] hover:bg-slate-50 cursor-pointer shadow-2xs"
             >
-              <span className="w-7 h-7 rounded-full bg-[#DCEAFE] text-[#0B3B91] font-bold text-xs flex items-center justify-center">
-                {initials}
+              <span className="w-8 h-8 rounded-full bg-[#073B83] text-white font-bold text-xs flex items-center justify-center">
+                AK
               </span>
-              <span className="hidden sm:inline text-xs font-semibold text-slate-800">
-                {admin?.name || 'Admin'}
+              <span className="hidden sm:inline text-xs font-bold text-[#102A5E]">
+                Admin
               </span>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+              <ChevronDown className="w-3.5 h-3.5 text-[#64748B]" />
             </button>
           </div>
         </header>
 
-        <main className="flex-1 p-4 lg:p-7 max-w-[1400px] w-full mx-auto">
+        <main className="flex-1 p-5 lg:p-7 max-w-[1440px] w-full mx-auto">
           <Outlet />
         </main>
-
-        <footer className="px-4 lg:px-8 py-4 border-t border-slate-200/80 text-xs text-slate-500 flex flex-wrap items-center justify-between gap-2">
-          <span className="flex items-center gap-1.5 font-medium">
-            <span className="font-bold text-[#0047BA]">FIC Locker</span>
-            <span className="text-slate-300">•</span>
-            <span>Admin Console v1.0</span>
-          </span>
-          <span className="inline-flex items-center gap-1 text-slate-400">
-            Secure Cloud Locker <Heart className="w-3.5 h-3.5 text-[#F7BA1E] fill-[#F7BA1E]" />
-          </span>
-        </footer>
       </div>
 
       <Modal open={sessionsOpen} title="Active Admin Sessions" onClose={() => setSessionsOpen(false)}>
@@ -273,32 +267,48 @@ export function AdminLayout() {
         ) : (
           <div className="space-y-3">
             {sessions.map((s) => (
-              <div key={s.id} className="p-3 rounded-xl border border-slate-200 flex items-center justify-between gap-3">
+              <div key={s.id} className="p-3 rounded-xl border border-[#E5EAF2] flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <Laptop className="w-3.5 h-3.5 text-slate-400" />
-                    <span className="text-sm font-medium text-slate-900">{s.sourceApp}</span>
+                    <span className="text-sm font-medium text-[#102A5E]">{s.sourceApp}</span>
                     {s.isCurrent && (
                       <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                         Current
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-slate-500 truncate">{s.userAgent || 'Unknown device'}</p>
+                  <p className="text-xs text-[#64748B] truncate">{s.userAgent || 'Unknown device'}</p>
                   <p className="text-xs text-slate-400">
-                    IP: {s.ipAddress || 'N/A'} • Last active {formatDateTime(s.lastUsedAt)}
+                    Active since {formatDateTime(s.createdAt)} &bull; Last seen {formatDateTime(s.lastUsedAt)}
                   </p>
                 </div>
-                <button
-                  onClick={() => handleRevoke(s.id, s.isCurrent)}
-                  className="px-2.5 py-1.5 text-xs font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg cursor-pointer"
-                >
-                  Revoke
-                </button>
+                {!s.isCurrent && (
+                  <button
+                    onClick={() => handleRevoke(s.id)}
+                    className="text-xs font-semibold text-rose-600 hover:text-rose-700 px-3 py-1.5 rounded-lg border border-rose-200 hover:bg-rose-50 transition cursor-pointer"
+                  >
+                    Revoke
+                  </button>
+                )}
               </div>
             ))}
           </div>
         )}
+        <div className="mt-5 pt-4 border-t border-[#E5EAF2] flex justify-between items-center">
+          <button
+            onClick={handleLogout}
+            className="text-xs font-semibold text-rose-600 hover:text-rose-700 cursor-pointer"
+          >
+            Sign Out of Platform
+          </button>
+          <button
+            onClick={() => setSessionsOpen(false)}
+            className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700 cursor-pointer"
+          >
+            Close
+          </button>
+        </div>
       </Modal>
     </div>
   );

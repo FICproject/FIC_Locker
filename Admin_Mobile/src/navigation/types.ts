@@ -7,6 +7,8 @@ export type AuthStackParamList = {
 export type UsersStackParamList = {
   UsersList: undefined;
   UserDetail: { userId: string };
+  UserDocuments: { userId: string; userName: string };
+  DocumentDetail: { documentId: string };
 };
 
 export type DocumentsStackParamList = {
