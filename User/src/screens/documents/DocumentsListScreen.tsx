@@ -20,6 +20,7 @@ import { formatBytes, formatDate } from '../../utils/formatters';
 import { SearchIcon } from '../../assets/icons';
 import { RenameDocumentModal } from '../../components/modals/RenameDocumentModal';
 import { MoveDocumentModal } from '../../components/modals/MoveDocumentModal';
+import { DocScannerFab } from '../../components/common/DocScannerFab';
 
 const TABS = ['All', 'PDF', 'Images', 'Others'];
 
@@ -425,6 +426,13 @@ export const DocumentsListScreen: React.FC<{ navigation: any; route?: any }> = (
         document={selectedDocForAction}
         onSuccess={() => fetchDocs()}
         onClose={() => setMoveModalVisible(false)}
+      />
+
+      {/* Doc Scanner Floating Dual Action Pill [ Camera | Plus ] */}
+      <DocScannerFab
+        onPressScan={() => navigation.navigate('ScanTab')}
+        onPressUpload={() => navigation.navigate('UploadDocument')}
+        bottomOffset={18}
       />
     </View>
   );

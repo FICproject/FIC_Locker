@@ -17,6 +17,7 @@ import { documentService, storageService } from '../../services/api/documentServ
 import { DocumentItem, StorageInfo } from '../../types';
 import { formatBytes } from '../../utils/formatters';
 import { BellIcon, SearchIcon, ScanIcon, UploadIcon } from '../../assets/icons';
+import { DocScannerFab } from '../../components/common/DocScannerFab';
 
 interface DashboardScreenProps {
   navigation: any;
@@ -187,33 +188,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
           </TouchableOpacity>
         </View>
 
-        {/* Action Buttons: 2-Column Grid (Quick Scan & Upload Document) */}
-        <View style={styles.actionGridRow}>
-          <TouchableOpacity
-            style={styles.quickScanGridCard}
-            onPress={() => navigation.navigate('ScanTab')}
-            activeOpacity={0.85}
-          >
-            <View style={styles.scanGridIconBadge}>
-              <ScanIcon size={22} color="#FFFFFF" />
-            </View>
-            <Text style={styles.quickScanGridTitle}>Quick Scan</Text>
-            <Text style={styles.quickScanGridSub}>With Camera</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.uploadGridCard}
-            onPress={() => navigation.navigate('UploadDocument')}
-            activeOpacity={0.85}
-          >
-            <View style={styles.uploadGridIconBadge}>
-              <UploadIcon size={22} color={colors.primary} />
-            </View>
-            <Text style={styles.uploadGridTitle}>Upload Document</Text>
-            <Text style={styles.uploadGridSub}>From Storage / Files</Text>
-          </TouchableOpacity>
-        </View>
-
         {/* Recent Documents Section */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Recent Documents</Text>
@@ -246,6 +220,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
           })}
         </ScrollView>
       </ScrollView>
+
+      {/* Doc Scanner Floating Dual Action Pill [ Camera | Plus ] */}
+      <DocScannerFab
+        onPressScan={() => navigation.navigate('ScanTab')}
+        onPressUpload={() => navigation.navigate('UploadDocument')}
+        bottomOffset={18}
+      />
     </View>
   );
 };
