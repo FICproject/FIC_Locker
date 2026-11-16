@@ -39,7 +39,7 @@ import {
   WelcomeBannerIllustration,
 } from '../../components/BrandAssets';
 
-const SUB_COLORS = ['#1D63DC', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899'];
+const SUB_COLORS = ['#0047BA', '#F7BA1E', '#10B981', '#8B5CF6', '#EC4899'];
 
 export function DashboardPage() {
   const [days, setDays] = useState(30);
@@ -93,14 +93,16 @@ export function DashboardPage() {
   return (
     <div className="space-y-6">
       {/* Hero Welcome Banner */}
-      <div className="bg-gradient-to-r from-[#EEF5FF] via-white to-[#FFF7E6] border border-blue-100 rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xs overflow-hidden">
+      <div className="bg-gradient-to-r from-[#FFFDF0] via-white to-[#EEF5FF] border border-amber-200/70 rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xs overflow-hidden">
         <div className="space-y-2.5">
           <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
             Welcome Back, Admin! <span aria-hidden="true">👋</span>
           </h1>
-          <p className="text-sm text-slate-600">Here&apos;s your platform overview for today.</p>
+          <p className="text-sm text-slate-600">
+            FIC Locker platform overview for today.
+          </p>
           <div className="flex flex-wrap items-center gap-2.5 pt-1">
-            <div className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#1D63DC] text-white text-xs font-semibold shadow-sm">
+            <div className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#0047BA] text-white text-xs font-semibold shadow-sm">
               <Calendar className="w-3.5 h-3.5" />
               <span>{todayLabel}</span>
             </div>
