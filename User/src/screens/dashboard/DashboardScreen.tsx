@@ -123,16 +123,31 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header with Greeting & Avatar */}
+        {/* Greeting Header */}
         <View style={styles.header}>
           <View style={styles.greetingContainer}>
             <View style={styles.greetingRow}>
               <Text style={styles.greeting} numberOfLines={1}>
-                Hello, {user?.name?.split(' ')[0] || 'Dhanu'}
+                Hello, {user?.name || user?.email?.split('@')[0] || 'dhanu.sri'}
               </Text>
               <Text style={styles.waveEmoji}>👋</Text>
             </View>
             <Text style={styles.greetingSub}>Your documents are safe with us!</Text>
+          </View>
+        </View>
+
+        {/* Search Bar on Notification Left Side */}
+        <View style={styles.searchNotificationRow}>
+          <View style={styles.searchBar}>
+            <SearchIcon size={18} color={colors.textMuted} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search documents..."
+              placeholderTextColor={colors.textMuted}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              onSubmitEditing={() => navigation.navigate('Search', { initialQuery: searchQuery })}
+            />
           </View>
 
           <TouchableOpacity
@@ -199,19 +214,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
           </TouchableOpacity>
         </View>
 
-        {/* Search Bar */}
-        <View style={styles.searchBar}>
-          <SearchIcon size={18} color={colors.textMuted} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search documents..."
-            placeholderTextColor={colors.textMuted}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            onSubmitEditing={() => navigation.navigate('Search', { initialQuery: searchQuery })}
-          />
-        </View>
-
         {/* Recent Documents Section */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Recent Documents</Text>
@@ -259,15 +261,11 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 22,
+    marginBottom: 16,
     marginTop: 4,
   },
   greetingContainer: {
     flex: 1,
-    marginRight: 16,
   },
   greetingRow: {
     flexDirection: 'row',
@@ -402,14 +400,20 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSizes.xs,
     marginTop: 2,
   },
+  searchNotificationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 18,
+    gap: 12,
+  },
   searchBar: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.surface,
     borderRadius: borderRadius.md,
     paddingHorizontal: 14,
     height: 46,
-    marginBottom: 24,
     borderWidth: 1,
     borderColor: colors.borderLight,
     ...shadows.subtle,
