@@ -4,6 +4,8 @@
  * Zero external native dependencies, zero Metro resolution issues, 100% offline.
  */
 
+import { Platform } from 'react-native';
+
 export interface PdfWatermarkOptions {
   text: string;
   opacity?: number;
@@ -31,6 +33,7 @@ export interface PdfPageItem {
 export interface PdfExportOptions {
   compression?: 'low' | 'medium' | 'high';
   password?: string;
+  pageSize?: 'A4' | 'A3' | 'A5' | 'Letter' | 'ID' | 'Legal' | 'Custom';
   watermark?: PdfWatermarkOptions;
   signatures?: PdfSignatureOptions[];
   title?: string;
@@ -71,7 +74,12 @@ export const pdfService = {
   async createPdfFromPages(
     pages: PdfPageItem[],
     options?: PdfExportOptions
-  ): Promise<{ base64DataUri: string; fileSizeBytes: number; pageCount: number }> {
+  ): Promise<{
+    base64DataUri: string;
+    fileUri?: string;
+    fileSizeBytes: number;
+    pageCount: number;
+  }> {
     const title = options?.title || 'FIC Locker Scanned Document';
     const author = options?.author || 'FIC Locker Secure Platform';
     const dateStr = new Date().toISOString().slice(0, 10);
@@ -97,9 +105,26 @@ export const pdfService = {
 
     const pageObjectRefs: string[] = [];
 
-    // Standard A4 dimensions in points: 595.28 x 841.89
-    const pageWidth = 595.28;
-    const pageHeight = 841.89;
+    // Page dimensions in points (A4: 595.28 x 841.89, A3: 841.89 x 1190.55, A5: 419.53 x 595.28)
+    let pageWidth = 595.28;
+    let pageHeight = 841.89;
+
+    if (options?.pageSize === 'A3') {
+      pageWidth = 841.89;
+      pageHeight = 1190.55;
+    } else if (options?.pageSize === 'A5') {
+      pageWidth = 419.53;
+      pageHeight = 595.28;
+    } else if (options?.pageSize === 'Letter') {
+      pageWidth = 612.00;
+      pageHeight = 792.00;
+    } else if (options?.pageSize === 'Legal') {
+      pageWidth = 612.00;
+      pageHeight = 1008.00;
+    } else if (options?.pageSize === 'ID') {
+      pageWidth = 242.64;
+      pageHeight = 153.07;
+    }
 
     for (let i = 0; i < pages.length; i++) {
       const pageItem = pages[i];
@@ -274,8 +299,27 @@ export const pdfService = {
     const dataUri = `data:application/pdf;base64,${base64Pdf}`;
     const fileSizeBytes = pdf.length;
 
+    let fileUri: string | undefined = undefined;
+    if (Platform.OS === 'android') {
+      try {
+        const { NativeModules } = require('react-native');
+        if (NativeModules.InAppCameraModule?.saveBase64ToFile) {
+          const safeName = title.replace(/[^a-zA-Z0-9_-]/g, '_');
+          const fileName = `${safeName}_${Date.now()}.pdf`;
+          fileUri = await NativeModules.InAppCameraModule.saveBase64ToFile(
+            base64Pdf,
+            fileName,
+            'application/pdf'
+          );
+        }
+      } catch (err) {
+        console.warn('[pdfService] saveBase64ToFile failed', err);
+      }
+    }
+
     return {
       base64DataUri: dataUri,
+      fileUri,
       fileSizeBytes,
       pageCount: pages.length,
     };

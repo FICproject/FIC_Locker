@@ -21,6 +21,7 @@ import { SearchIcon } from '../../assets/icons';
 import { RenameDocumentModal } from '../../components/modals/RenameDocumentModal';
 import { MoveDocumentModal } from '../../components/modals/MoveDocumentModal';
 import { DocScannerFab } from '../../components/common/DocScannerFab';
+import { shareService } from '../../services/shareService';
 
 const TABS = ['All', 'PDF', 'Images', 'Others'];
 
@@ -190,6 +191,10 @@ export const DocumentsListScreen: React.FC<{ navigation: any; route?: any }> = (
   const handleDocumentLongPress = (item: DocumentItem) => {
     setSelectedDocForAction(item);
     Alert.alert(item.name, 'Choose an action for this document:', [
+      {
+        text: '📤 Share Document',
+        onPress: () => shareService.shareDocument(item),
+      },
       {
         text: '✏️ Rename',
         onPress: () => setRenameModalVisible(true),

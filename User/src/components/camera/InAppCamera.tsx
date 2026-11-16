@@ -22,7 +22,13 @@ import {
 import { colors, typography, borderRadius } from '../../theme';
 
 export interface InAppCameraRef {
-  capture: () => Promise<{ uri: string; width: number; height: number }>;
+  capture: () => Promise<{
+    uri: string;
+    width: number;
+    height: number;
+    detectedCorners?: any;
+    paperSize?: string;
+  }>;
   setTorch: (enabled: boolean) => Promise<boolean>;
   isReady: () => boolean;
 }
@@ -32,6 +38,7 @@ export interface InAppCameraProps {
   style?: StyleProp<ViewStyle>;
   onPermissionChange?: (granted: boolean) => void;
   onCameraReady?: () => void;
+  onDocumentDetected?: (event: any) => void;
 }
 
 // Check native registration
@@ -44,7 +51,7 @@ const NativeCameraView = isNativeCameraSupported
   : null;
 
 export const InAppCamera = forwardRef<InAppCameraRef, InAppCameraProps>(
-  ({ torchOn = false, style, onPermissionChange, onCameraReady }, ref) => {
+  ({ torchOn = false, style, onPermissionChange, onCameraReady, onDocumentDetected }, ref) => {
     const [hasPermission, setHasPermission] = useState<boolean | null>(null);
     const [isNativeReady, setIsNativeReady] = useState<boolean>(false);
     const [isRequestingPerm, setIsRequestingPerm] = useState<boolean>(false);
@@ -115,6 +122,8 @@ export const InAppCamera = forwardRef<InAppCameraRef, InAppCameraProps>(
               uri: photo.uri,
               width: photo.width || 1920,
               height: photo.height || 1080,
+              detectedCorners: photo.detectedCorners,
+              paperSize: photo.paperSize,
             };
           } catch (err: any) {
             console.warn('Native in-app capture error:', err);
@@ -183,6 +192,9 @@ export const InAppCamera = forwardRef<InAppCameraRef, InAppCameraProps>(
           <NativeCameraView
             style={StyleSheet.absoluteFill}
             torchOn={torchOn}
+            onDocumentDetected={(e: any) => {
+              onDocumentDetected?.(e.nativeEvent);
+            }}
           />
         </View>
       );

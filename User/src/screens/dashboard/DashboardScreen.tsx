@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  TextInput,
   RefreshControl,
   Image,
   StatusBar,
@@ -37,7 +36,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
 
   const [recentDocs, setRecentDocs] = useState<DocumentItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
 
   const loadDashboardData = async () => {
     try {
@@ -124,7 +122,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         showsVerticalScrollIndicator={false}
       >
-        {/* Greeting Header */}
+        {/* Greeting Header with Search Icon on Notification Left Side */}
         <View style={styles.header}>
           <View style={styles.greetingContainer}>
             <View style={styles.greetingRow}>
@@ -135,30 +133,29 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
             </View>
             <Text style={styles.greetingSub}>Your documents are safe with us!</Text>
           </View>
-        </View>
 
-        {/* Search Bar on Notification Left Side */}
-        <View style={styles.searchNotificationRow}>
-          <View style={styles.searchBar}>
-            <SearchIcon size={18} color={colors.textMuted} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search documents..."
-              placeholderTextColor={colors.textMuted}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              onSubmitEditing={() => navigation.navigate('Search', { initialQuery: searchQuery })}
-            />
+          <View style={styles.headerActions}>
+            {/* Search Symbol Button - on Notification Left Side */}
+            <TouchableOpacity
+              style={styles.headerButton}
+              onPress={() => navigation.navigate('Search')}
+              activeOpacity={0.7}
+              accessibilityLabel="Search documents"
+            >
+              <SearchIcon size={20} color={colors.text} />
+            </TouchableOpacity>
+
+            {/* Notification Bell Button */}
+            <TouchableOpacity
+              style={styles.headerButton}
+              onPress={() => navigation.navigate('Notifications')}
+              activeOpacity={0.7}
+              accessibilityLabel="Notifications"
+            >
+              <BellIcon size={22} color={colors.text} />
+              <View style={styles.badgeDot} />
+            </TouchableOpacity>
           </View>
-
-          <TouchableOpacity
-            style={styles.bellButton}
-            onPress={() => navigation.navigate('Notifications')}
-            activeOpacity={0.7}
-          >
-            <BellIcon size={22} color={colors.text} />
-            <View style={styles.badgeDot} />
-          </TouchableOpacity>
         </View>
 
         {/* Storage Summary Cards Row */}
@@ -242,11 +239,15 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   header: {
-    marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
     marginTop: 4,
   },
   greetingContainer: {
     flex: 1,
+    paddingRight: 12,
   },
   greetingRow: {
     flexDirection: 'row',
@@ -267,10 +268,15 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 3,
   },
-  bellButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  headerButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
@@ -280,8 +286,8 @@ const styles = StyleSheet.create({
   },
   badgeDot: {
     position: 'absolute',
-    top: 11,
-    right: 13,
+    top: 10,
+    right: 12,
     width: 8,
     height: 8,
     borderRadius: 4,
@@ -380,30 +386,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: typography.fontSizes.xs,
     marginTop: 2,
-  },
-  searchNotificationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 18,
-    gap: 12,
-  },
-  searchBar: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
-    paddingHorizontal: 14,
-    height: 46,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-    ...shadows.subtle,
-  },
-  searchInput: {
-    flex: 1,
-    marginLeft: 10,
-    fontSize: typography.fontSizes.base,
-    color: colors.text,
   },
   sectionHeader: {
     flexDirection: 'row',

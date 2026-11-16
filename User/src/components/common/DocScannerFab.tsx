@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { CameraIcon, PlusIcon } from '../../assets/icons';
+import { colors, shadows } from '../../theme';
 
 interface DocScannerFabProps {
   onPressScan: () => void;
@@ -47,16 +48,16 @@ const styles = StyleSheet.create({
     right: 20,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#0284C7', // Vibrant DocScanner blue
+    backgroundColor: colors.primary, // App primary purple #6C47FF
     borderRadius: 28,
     height: 52,
     paddingHorizontal: 4,
     ...Platform.select({
       ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 5,
+        shadowColor: colors.primary,
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.35,
+        shadowRadius: 8,
       },
       android: {
         elevation: 8,
