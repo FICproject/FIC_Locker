@@ -290,7 +290,7 @@ router.post(
       if (session.revokedAt || session.expiresAt <= new Date()) {
         throw new HttpError(401, 'Session expired or refresh token revoked.');
       }
-    } else if (env.useLocalEmbeddedDb || env.nodeEnv === 'development') {
+    } else if (env.nodeEnv === 'development') {
       const adminAccount = await AdminCredential.findOne({
         $or: [{ _id: payload.sub }, { email: payload.email.toLowerCase() }],
         singletonKey: 'PLATFORM_ADMIN',

@@ -8,7 +8,7 @@ function resolveDevHost(): string {
       return match[1];
     }
   }
-  return Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+  return Platform.OS === 'android' ? '192.168.100.110' : 'localhost';
 }
 
 // Automatically matches localhost (USB adb reverse / iOS), 10.0.2.2 (Android emulator),

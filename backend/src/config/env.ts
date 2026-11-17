@@ -7,7 +7,6 @@ export const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT || 5000),
   apiPrefix: process.env.API_PREFIX || '/api/v1',
-  useLocalEmbeddedDb: process.env.USE_LOCAL_EMBEDDED_DB === 'true',
   mongodbUri: process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/doc_scanner_saas',
   jwtAdminAccessSecret: process.env.JWT_ADMIN_ACCESS_SECRET || 'dev_only_admin_access_secret_replace_in_prod_32chars',
   jwtAdminRefreshSecret: process.env.JWT_ADMIN_REFRESH_SECRET || 'dev_only_admin_refresh_secret_replace_in_prod_32chars',
@@ -29,13 +28,11 @@ export const env = {
     from: process.env.SMTP_FROM || 'FIC Locker Admin <no-reply@ficlocker.local>',
   },
   adminWebUrl: process.env.ADMIN_WEB_URL || 'http://localhost:5173',
-  aws: {
-    region: process.env.AWS_REGION || 'ap-south-1',
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
-    bucketName: process.env.S3_BUCKET_NAME || '',
-    endpoint: process.env.S3_ENDPOINT || '',
-    presignedTtlSeconds: Number(process.env.S3_PRESIGNED_TTL_SECONDS || 120),
+  cloudinary: {
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME || '',
+    apiKey: process.env.CLOUDINARY_API_KEY || '',
+    apiSecret: process.env.CLOUDINARY_API_SECRET || '',
+    folder: process.env.CLOUDINARY_FOLDER || 'fic_locker/documents',
   },
   razorpay: {
     keyId: process.env.RAZORPAY_KEY_ID || '',
