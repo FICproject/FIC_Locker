@@ -56,17 +56,32 @@ router.get(
     ]);
 
     const userIds = users.map((u) => u._id);
-    const activeSubs = await Subscription.find({ userId: { $in: userIds } })
-      .sort({ createdAt: -1 })
-      .lean();
+    const [activeSubs, docStats] = await Promise.all([
+      Subscription.find({ userId: { $in: userIds } })
+        .sort({ createdAt: -1 })
+        .lean(),
+      StoredDocument.aggregate([
+        { $match: { ownerId: { $in: userIds }, status: { $ne: 'deleted' } } },
+        { $group: { _id: '$ownerId', count: { $sum: 1 }, totalBytes: { $sum: '$totalSizeBytes' } } },
+      ]),
+    ]);
+
     const subByUser = new Map<string, (typeof activeSubs)[0]>();
     for (const s of activeSubs) {
       const uid = s.userId.toString();
       if (!subByUser.has(uid)) subByUser.set(uid, s);
     }
 
+    const statsByUser = new Map<string, { count: number; totalBytes: number }>();
+    for (const s of docStats) {
+      statsByUser.set(s._id.toString(), { count: s.count, totalBytes: s.totalBytes });
+    }
+
     const items = users.map((u) => {
       const sub = subByUser.get(u._id.toString());
+      const stats = statsByUser.get(u._id.toString());
+      const totalDocuments = stats ? stats.count : (u.totalDocuments || 0);
+      const storageUsedBytes = stats ? stats.totalBytes : (u.storageUsedBytes || 0);
       return {
         _id: u._id.toString(),
         fullName: u.fullName,
@@ -74,8 +89,8 @@ router.get(
         phone: u.phone,
         status: u.status,
         registrationDate: u.createdAt,
-        storageUsedBytes: u.storageUsedBytes,
-        totalDocuments: u.totalDocuments,
+        storageUsedBytes,
+        totalDocuments,
         planName: (u.currentPlanId as unknown as { name?: string } | null)?.name || 'Free',
         subscriptionStatus: sub?.status,
         recoveryRequestStatus: u.recoveryRequestStatus,

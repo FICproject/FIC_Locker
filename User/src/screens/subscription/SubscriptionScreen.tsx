@@ -11,17 +11,25 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, typography, borderRadius, shadows } from '../../theme';
+import { useAuth } from '../../context/AuthContext';
 import { subscriptionService } from '../../services/api/documentService';
+import { RazorpayCheckoutModal } from '../../components/modals/RazorpayCheckoutModal';
 import type { SubscriptionPlan, UserSubscription } from '../../types';
 import { formatBytes } from '../../utils/formatters';
 
 export const SubscriptionScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
+  const { refreshProfile } = useAuth();
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'annual'>('monthly');
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [currentSub, setCurrentSub] = useState<UserSubscription | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Razorpay Checkout State
+  const [checkoutVisible, setCheckoutVisible] = useState(false);
+  const [activeOrder, setActiveOrder] = useState<any>(null);
+  const [subscribingId, setSubscribingId] = useState<string | null>(null);
 
   const loadPlans = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -58,135 +66,171 @@ export const SubscriptionScreen: React.FC<{ navigation: any }> = ({ navigation }
   }, [loadPlans]);
 
   const handleSubscribe = async (planId: string, planCode?: string) => {
-    if (planCode === 'free' || planId === 'free') return;
-    try {
-      Alert.alert('Payment Processing', 'Redirecting to secure backend checkout session...');
-      await subscriptionService.upgradePlan(planId, billingCycle);
+    if (planCode === 'free' || planId === 'free') {
       Alert.alert(
-        'Payment Initiated',
-        'Waiting for verified backend webhook confirmation before updating entitlements.'
+        'Free Plan Active',
+        'You are currently enjoying the FIC Locker Free plan with 500 MB cloud storage.'
       );
-    } catch (e) {
-      Alert.alert('Notice', 'Checkout session initialized via secure backend.');
+      return;
+    }
+
+    setSubscribingId(planId);
+    try {
+      const orderRes = await subscriptionService.createOrder(planId, billingCycle);
+      setActiveOrder(orderRes);
+      setCheckoutVisible(true);
+    } catch (err: any) {
+      console.error('[SubscriptionScreen] Order creation error:', err);
+      Alert.alert(
+        'Checkout Initialization Failed',
+        err?.response?.data?.message || err?.message || 'Unable to connect to Razorpay payment gateway.'
+      );
+    } finally {
+      setSubscribingId(null);
     }
   };
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.scrollContent}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadPlans(true)} />}
-    >
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Subscription & Plans</Text>
-        <View style={{ width: 20 }} />
-      </View>
-
-      {/* Billing Switch */}
-      <View style={styles.switchContainer}>
-        <TouchableOpacity
-          style={[styles.switchOption, billingCycle === 'monthly' && styles.switchActive]}
-          onPress={() => setBillingCycle('monthly')}
-        >
-          <Text style={[styles.switchText, billingCycle === 'monthly' && styles.switchTextActive]}>
-            Monthly
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.switchOption, billingCycle === 'annual' && styles.switchActive]}
-          onPress={() => setBillingCycle('annual')}
-        >
-          <Text style={[styles.switchText, billingCycle === 'annual' && styles.switchTextActive]}>
-            Annual (Save ~20%)
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {loading && !refreshing ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingText}>Loading subscription plans...</Text>
+    <View style={styles.container}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadPlans(true)} />}
+      >
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+            <Text style={styles.backText}>←</Text>
+          </TouchableOpacity>
+          <Text style={styles.title}>Subscription & Plans</Text>
+          <View style={{ width: 20 }} />
         </View>
-      ) : plans.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>
-            {errorMessage || 'No subscription plans currently available.'}
-          </Text>
+
+        {/* Billing Switch */}
+        <View style={styles.switchContainer}>
           <TouchableOpacity
-            style={styles.retryBtn}
-            onPress={() => loadPlans(true)}
-            activeOpacity={0.8}
+            style={[styles.switchOption, billingCycle === 'monthly' && styles.switchActive]}
+            onPress={() => setBillingCycle('monthly')}
           >
-            <Text style={styles.retryBtnText}>↻ Refresh Plans</Text>
+            <Text style={[styles.switchText, billingCycle === 'monthly' && styles.switchTextActive]}>
+              Monthly
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.switchOption, billingCycle === 'annual' && styles.switchActive]}
+            onPress={() => setBillingCycle('annual')}
+          >
+            <Text style={[styles.switchText, billingCycle === 'annual' && styles.switchTextActive]}>
+              Annual (Save ~20%)
+            </Text>
           </TouchableOpacity>
         </View>
-      ) : (
-        plans.map((p) => {
-          const isCurrent =
-            p.code === 'free' ||
-            currentSub?.planId === p._id ||
-            currentSub?.planName?.toLowerCase() === p.name.toLowerCase();
 
-          const monthlyPrice = p.monthlyPriceInr ?? p.priceMonthly ?? 0;
-          const annualPrice = p.annualPriceInr ?? p.priceAnnually ?? 0;
-          const priceDisplay =
-            billingCycle === 'monthly'
-              ? monthlyPrice === 0
+        {loading && !refreshing ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={styles.loadingText}>Loading subscription plans...</Text>
+          </View>
+        ) : plans.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>
+              {errorMessage || 'No subscription plans currently available.'}
+            </Text>
+            <TouchableOpacity
+              style={styles.retryBtn}
+              onPress={() => loadPlans(true)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.retryBtnText}>↻ Refresh Plans</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          plans.map((p) => {
+            const isCurrent =
+              p.code === 'free' ||
+              currentSub?.planId === p._id ||
+              currentSub?.planName?.toLowerCase() === p.name.toLowerCase();
+
+            const monthlyPrice = p.monthlyPriceInr ?? p.priceMonthly ?? 0;
+            const annualPrice = p.annualPriceInr ?? p.priceAnnually ?? 0;
+            const priceDisplay =
+              billingCycle === 'monthly'
+                ? monthlyPrice === 0
+                  ? '₹0'
+                  : `₹${monthlyPrice}/mo`
+                : annualPrice === 0
                 ? '₹0'
-                : `₹${monthlyPrice}/mo`
-              : annualPrice === 0
-              ? '₹0'
-              : `₹${annualPrice}/yr`;
+                : `₹${annualPrice}/yr`;
 
-          const storageBytes = p.storageLimitBytes ?? p.storageQuotaBytes ?? 0;
-          const storageDisplay = storageBytes > 0 ? `${formatBytes(storageBytes)} Cloud Storage` : '';
+            const storageBytes = p.storageLimitBytes ?? p.storageQuotaBytes ?? 0;
+            const storageDisplay = storageBytes > 0 ? `${formatBytes(storageBytes)} Cloud Storage` : '';
 
-          const isPopular =
-            p.isPopular || p.code === 'plus' || p.code === 'pro' || p.name.toLowerCase().includes('plus');
+            const isPopular =
+              p.isPopular || p.code === 'plus' || p.code === 'pro' || p.name.toLowerCase().includes('plus');
+            const isSubscribingThis = subscribingId === p._id;
 
-          return (
-            <View key={p._id || p.code} style={[styles.card, isPopular && styles.popularCard]}>
-              {isPopular && (
-                <View style={styles.popularBadge}>
-                  <Text style={styles.popularBadgeText}>MOST POPULAR</Text>
-                </View>
-              )}
-              <Text style={styles.planName}>{p.name}</Text>
-              <Text style={styles.planPrice}>{priceDisplay}</Text>
-              {storageDisplay ? <Text style={styles.planStorage}>{storageDisplay}</Text> : null}
-              {p.description ? <Text style={styles.planDesc}>{p.description}</Text> : null}
+            return (
+              <View key={p._id || p.code} style={[styles.card, isPopular && styles.popularCard]}>
+                {isPopular && (
+                  <View style={styles.popularBadge}>
+                    <Text style={styles.popularBadgeText}>MOST POPULAR</Text>
+                  </View>
+                )}
+                <Text style={styles.planName}>{p.name}</Text>
+                <Text style={styles.planPrice}>{priceDisplay}</Text>
+                {storageDisplay ? <Text style={styles.planStorage}>{storageDisplay}</Text> : null}
+                {p.description ? <Text style={styles.planDesc}>{p.description}</Text> : null}
 
-              <View style={styles.divider} />
+                <View style={styles.divider} />
 
-              {(p.features || []).map((f, i) => (
-                <Text key={i} style={styles.featureItem}>
-                  ✓  {f}
-                </Text>
-              ))}
+                {(p.features || []).map((f, i) => (
+                  <Text key={i} style={styles.featureItem}>
+                    ✓  {f}
+                  </Text>
+                ))}
 
-              <TouchableOpacity
-                style={[styles.planBtn, isPopular ? styles.popularBtn : styles.starterBtn]}
-                onPress={() => handleSubscribe(p._id, p.code)}
-                disabled={isCurrent}
-              >
-                <Text
+                <TouchableOpacity
                   style={[
-                    styles.planBtnText,
-                    isPopular ? styles.popularBtnText : styles.starterBtnText,
+                    styles.planBtn,
+                    isPopular ? styles.popularBtn : styles.starterBtn,
+                    isCurrent && styles.currentPlanBtn,
                   ]}
+                  onPress={() => handleSubscribe(p._id, p.code)}
+                  disabled={isCurrent || isSubscribingThis}
+                  activeOpacity={0.8}
                 >
-                  {isCurrent ? 'Current Plan' : `Upgrade to ${p.name}`}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          );
-        })
-      )}
-    </ScrollView>
+                  {isSubscribingThis ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text
+                      style={[
+                        styles.planBtnText,
+                        isPopular ? styles.popularBtnText : styles.starterBtnText,
+                        isCurrent && styles.currentPlanBtnText,
+                      ]}
+                    >
+                      {isCurrent ? '✓ Current Plan' : `Upgrade to ${p.name}`}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            );
+          })
+        )}
+      </ScrollView>
+
+      {/* Razorpay Native Payment Modal */}
+      <RazorpayCheckoutModal
+        visible={checkoutVisible}
+        orderData={activeOrder}
+        billingCycle={billingCycle}
+        onClose={() => setCheckoutVisible(false)}
+        onSuccess={async () => {
+          setCheckoutVisible(false);
+          await Promise.all([loadPlans(true), refreshProfile().catch(() => {})]);
+        }}
+      />
+    </View>
   );
 };
 
@@ -194,6 +238,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F8F9FE',
+  },
+  scrollView: {
+    flex: 1,
   },
   scrollContent: {
     paddingHorizontal: 20,
@@ -354,6 +401,13 @@ const styles = StyleSheet.create({
   },
   starterBtnText: {
     color: colors.textMuted,
+    fontWeight: 'bold',
+  },
+  currentPlanBtn: {
+    backgroundColor: '#E5E7EB',
+  },
+  currentPlanBtnText: {
+    color: '#6B7280',
     fontWeight: 'bold',
   },
 });

@@ -22,6 +22,8 @@ import adminEventsRoutes from './modules/events/adminEvents.routes';
 import { Plan } from './models/PlanAndSubscription';
 import { userDocumentsRouter } from './modules/documents/userDocuments.routes';
 import { userSharedRouter } from './modules/userShared.routes';
+import { userAuthRouter } from './modules/auth/userAuth.routes';
+import { userSubscriptionsRouter } from './modules/subscriptions/userSubscriptions.routes';
 
 export function createApp() {
   const app = express();
@@ -77,12 +79,12 @@ export function createApp() {
     }
   };
 
-  app.get(`${env.apiPrefix}/subscriptions/plans`, getPublicPlansHandler);
-  app.get(`${env.apiPrefix}/plans`, getPublicPlansHandler);
+  // Subscriptions & Razorpay Payment (/api/v1/subscriptions/*, /api/v1/plans)
+  app.use(`${env.apiPrefix}/subscriptions`, userSubscriptionsRouter);
+  app.use(`${env.apiPrefix}/plans`, userSubscriptionsRouter);
 
-  app.get(`${env.apiPrefix}/subscriptions/current`, async (_req, res) => {
-    return res.json({ success: true, subscription: null });
-  });
+  // User Authentication (/api/v1/auth/register, /api/v1/auth/login, /api/v1/auth/me)
+  app.use(`${env.apiPrefix}/auth`, userAuthRouter);
 
   // User Document & App Routes (/api/v1/documents/*, /api/v1/categories, /api/v1/storage/info)
   app.use(`${env.apiPrefix}/documents`, userDocumentsRouter);

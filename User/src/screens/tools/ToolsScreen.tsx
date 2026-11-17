@@ -1,425 +1,247 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
+  TextInput,
   StatusBar,
-  ActivityIndicator,
-  NativeModules,
+  Dimensions,
+  Platform,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { launchImageLibrary } from 'react-native-image-picker';
 import { colors, typography, borderRadius, shadows } from '../../theme';
-import { PdfToolsModal } from '../../components/modals/PdfToolsModal';
-import { OcrViewerModal } from '../../components/modals/OcrViewerModal';
-import { SignatureModal } from '../../components/modals/SignatureModal';
-import { WatermarkModal } from '../../components/modals/WatermarkModal';
-import { ocrService } from '../../services/ocrService';
-import { pdfService, PdfPageItem } from '../../services/pdfService';
-import { shareService } from '../../services/shareService';
-import { documentService } from '../../services/api/documentService';
-import { DocumentItem } from '../../types';
+import {
+  PdfToolItem,
+  PdfCategoryGroup,
+} from '../../types/pdfTools';
+import { PDF_CATEGORIES, ALL_PDF_TOOLS } from '../../services/pdfEngineService';
 
-interface ToolItem {
-  id: string;
-  title: string;
-  subtitle: string;
-  icon: string;
-  category: 'pdf' | 'ocr' | 'sign' | 'scan';
-  badge?: string;
-  badgeColor?: string;
-  action: () => void;
-}
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+// User App Brand Palette: Primary Indigo/Purple
+const PRIMARY = colors.primary; // '#6C47FF'
+const PRIMARY_DARK = colors.primaryDark; // '#502DDE'
+const PRIMARY_LIGHT = colors.primaryLight; // '#8F71FF'
+const PRIMARY_SOFT = colors.primarySoft; // '#F4F0FF'
 
 export const ToolsScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
-  const [loading, setLoading] = useState(false);
-  const [loadingText, setLoadingText] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeCategoryKey, setActiveCategoryKey] = useState<string>('all');
 
-  // Modals state
-  const [pdfToolsVisible, setPdfToolsVisible] = useState(false);
-  const [pdfPages, setPdfPages] = useState<PdfPageItem[]>([]);
-  const [activeDocTitle, setActiveDocTitle] = useState('Document');
+  // Filter tools based on search query and category tab
+  const filteredCategories = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
 
-  const [ocrModalVisible, setOcrModalVisible] = useState(false);
-  const [ocrImageUri, setOcrImageUri] = useState('');
-  const [extractedOcrText, setExtractedOcrText] = useState('');
-
-  const [sigModalVisible, setSigModalVisible] = useState(false);
-  const [watermarkModalVisible, setWatermarkModalVisible] = useState(false);
-
-  // 1. Convert Images to PDF / Page Organiser
-  const handleOpenPdfTools = async (modeTitle: string) => {
-    try {
-      const res = await launchImageLibrary({
-        mediaType: 'photo',
-        selectionLimit: 10,
-        quality: 0.9,
-      });
-
-      if (res.didCancel || !res.assets || res.assets.length === 0) return;
-
-      const pages: PdfPageItem[] = res.assets
-        .filter((a) => !!a.uri)
-        .map((a, idx) => ({
-          id: `page_${Date.now()}_${idx}`,
-          uri: a.uri!,
-          rotationDeg: 0,
-        }));
-
-      if (pages.length === 0) {
-        Alert.alert('No Images', 'Please select at least one image to continue.');
-        return;
+    return PDF_CATEGORIES.map((cat) => {
+      // Check if category matches active filter
+      if (activeCategoryKey !== 'all' && cat.key !== activeCategoryKey) {
+        return { ...cat, tools: [] };
       }
 
-      setPdfPages(pages);
-      setActiveDocTitle(modeTitle || 'PDF_Tool_Doc');
-      setPdfToolsVisible(true);
-    } catch (err: any) {
-      Alert.alert('Error', err.message || 'Failed to select images.');
-    }
-  };
-
-  // 2. OCR Text Recognition
-  const handleRunOcr = async () => {
-    try {
-      const res = await launchImageLibrary({
-        mediaType: 'photo',
-        quality: 0.9,
+      // Filter tools by search query
+      const matchingTools = cat.tools.filter((t) => {
+        if (!q) return true;
+        return (
+          t.title.toLowerCase().includes(q) ||
+          t.subtitle.toLowerCase().includes(q) ||
+          cat.title.toLowerCase().includes(q)
+        );
       });
 
-      const uri = res.assets?.[0]?.uri;
-      if (!uri) return;
+      return {
+        ...cat,
+        tools: matchingTools,
+      };
+    }).filter((cat) => cat.tools.length > 0);
+  }, [searchQuery, activeCategoryKey]);
 
-      setLoading(true);
-      setLoadingText('Recognizing text offline...');
-      setOcrImageUri(uri);
-
-      const ocrResult = await ocrService.recognizeTextFromImage(uri);
-      setLoading(false);
-
-      setExtractedOcrText(ocrResult.fullText);
-      setOcrModalVisible(true);
-    } catch (err: any) {
-      setLoading(false);
-      Alert.alert('OCR Error', err.message || 'Failed to extract text.');
+  const handleToolPress = (tool: PdfToolItem) => {
+    if (tool.id === 'scan_to_pdf') {
+      navigation.navigate('Scanner');
+    } else {
+      navigation.navigate('PdfToolDetail', {
+        toolId: tool.id,
+        toolTitle: tool.title,
+      });
     }
   };
 
-  const tools: ToolItem[] = [
-    {
-      id: 'img_to_pdf',
-      title: 'Images to PDF',
-      subtitle: 'Convert one or multiple images into a clean PDF document',
-      icon: '📄',
-      category: 'pdf',
-      badge: 'Popular',
-      badgeColor: '#10B981',
-      action: () => handleOpenPdfTools('Converted_Document'),
-    },
-    {
-      id: 'compress_pdf',
-      title: 'PDF Compression',
-      subtitle: 'Reduce PDF file size (Low, Medium, High compression)',
-      icon: '🗜️',
-      category: 'pdf',
-      badge: 'Advanced',
-      badgeColor: colors.primary,
-      action: () => handleOpenPdfTools('Compressed_PDF'),
-    },
-    {
-      id: 'page_organise',
-      title: 'Organise & Reorder Pages',
-      subtitle: 'Reorder, rotate, add, and delete pages easily',
-      icon: '📑',
-      category: 'pdf',
-      action: () => handleOpenPdfTools('Organised_PDF'),
-    },
-    {
-      id: 'protect_pdf',
-      title: 'Password Protect PDF',
-      subtitle: 'Secure documents with AES password protection',
-      icon: '🔒',
-      category: 'pdf',
-      badge: 'Security',
-      badgeColor: '#EF4444',
-      action: () => handleOpenPdfTools('Protected_PDF'),
-    },
-    {
-      id: 'ocr_extract',
-      title: 'Extract Text (OCR)',
-      subtitle: '100% offline structured text recognition with in-text search',
-      icon: '🔍',
-      category: 'ocr',
-      badge: 'Offline',
-      badgeColor: '#8B5CF6',
-      action: handleRunOcr,
-    },
-    {
-      id: 'signature',
-      title: 'Add Digital Signature',
-      subtitle: 'Draw or upload smooth vector signatures on documents',
-      icon: '✍️',
-      category: 'sign',
-      action: () => setSigModalVisible(true),
-    },
-    {
-      id: 'watermark',
-      title: 'Custom Watermark',
-      subtitle: 'Apply diagonal or horizontal text watermarks with opacity',
-      icon: '💧',
-      category: 'sign',
-      action: () => setWatermarkModalVisible(true),
-    },
-    {
-      id: 'camera_scanner',
-      title: 'In-App Camera Scanner',
-      subtitle: 'Edge detection, auto capture, and multi-page batch scanning',
-      icon: '📷',
-      category: 'scan',
-      badge: 'Live',
-      badgeColor: '#F59E0B',
-      action: () => navigation.navigate('Scanner'),
-    },
+  const categoryTabs = [
+    { key: 'all', label: 'All Tools', count: ALL_PDF_TOOLS.length },
+    { key: 'management', label: 'Management', count: 10 },
+    { key: 'editing', label: 'Editing', count: 9 },
+    { key: 'convert_to', label: 'PDF to Other', count: 7 },
+    { key: 'convert_from', label: 'Other to PDF', count: 6 },
+    { key: 'security', label: 'Security', count: 6 },
+    { key: 'advanced', label: 'Advanced', count: 5 },
   ];
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#F8F9FE" translucent={false} />
+      <StatusBar barStyle="light-content" backgroundColor={PRIMARY_DARK} />
 
-      {/* Header */}
+      {/* App Primary Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Tools</Text>
+        <View style={styles.headerTopRow}>
+          <View style={styles.brandBadge}>
+            <Text style={styles.brandBadgeText}>FIC LOCKER PDF SUITE</Text>
+          </View>
+          <View style={styles.offlinePill}>
+            <Text style={styles.offlinePillText}>⚡ 100% Offline</Text>
+          </View>
+        </View>
+
+        <Text style={styles.headerTitle}>PDF Tools</Text>
         <Text style={styles.headerSubtitle}>
-          Professional PDF, OCR, Scanning & Security Tools
+          Complete professional suite for editing, converting & securing documents
         </Text>
+
+        {/* Search Bar */}
+        <View style={styles.searchBar}>
+          <Text style={styles.searchIcon}>🔍</Text>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search across 43 PDF tools..."
+            placeholderTextColor="#9CA3AF"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            clearButtonMode="while-editing"
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearSearchBtn}>
+              <Text style={styles.clearSearchText}>✕</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
-      {/* Loading Overlay */}
-      {loading && (
-        <View style={styles.loadingCard}>
-          <ActivityIndicator size="small" color={colors.primary} />
-          <Text style={styles.loadingCardText}>{loadingText}</Text>
-        </View>
-      )}
+      {/* Category Filter Pills Bar */}
+      <View style={styles.categoryBarWrapper}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.categoryBar}
+        >
+          {categoryTabs.map((tab) => {
+            const isActive = activeCategoryKey === tab.key;
+            return (
+              <TouchableOpacity
+                key={tab.key}
+                style={[styles.categoryPill, isActive && styles.categoryPillActive]}
+                onPress={() => setActiveCategoryKey(tab.key)}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.categoryPillText,
+                    isActive && styles.categoryPillTextActive,
+                  ]}
+                >
+                  {tab.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
 
-      {/* Tools List */}
+      {/* Tools Content Grid */}
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={styles.contentContainer}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.sectionLabel}>PDF & Document Tools</Text>
-        {tools
-          .filter((t) => t.category === 'pdf')
-          .map((tool) => (
+        {filteredCategories.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyEmoji}>🔍</Text>
+            <Text style={styles.emptyTitle}>No PDF Tools Found</Text>
+            <Text style={styles.emptySubtitle}>
+              No tools matched your search "{searchQuery}". Try a different keyword.
+            </Text>
             <TouchableOpacity
-              key={tool.id}
-              style={styles.toolCard}
-              onPress={tool.action}
-              activeOpacity={0.75}
+              style={styles.resetSearchBtn}
+              onPress={() => setSearchQuery('')}
             >
-              <View style={styles.toolIconContainer}>
-                <Text style={styles.toolIcon}>{tool.icon}</Text>
+              <Text style={styles.resetSearchText}>Clear Search</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          filteredCategories.map((group, groupIdx) => (
+            <View key={group.key} style={styles.categorySection}>
+              {/* Category Header */}
+              <View style={styles.categoryHeader}>
+                <View style={styles.categoryTitleCol}>
+                  <Text style={styles.categoryTitle}>{group.title}</Text>
+                  <Text style={styles.categoryDesc}>{group.description}</Text>
+                </View>
               </View>
 
-              <View style={styles.toolTextContainer}>
-                <View style={styles.toolTitleRow}>
-                  <Text style={styles.toolTitle}>{tool.title}</Text>
-                  {tool.badge && (
-                    <View
-                      style={[
-                        styles.badgePill,
-                        { backgroundColor: tool.badgeColor ? `${tool.badgeColor}20` : '#EDE9FE' },
-                      ]}
-                    >
-                      <Text
+              {/* Tools 4-Column Grid */}
+              <View style={styles.toolsGrid}>
+                {group.tools.map((tool) => (
+                  <TouchableOpacity
+                    key={tool.id}
+                    style={styles.toolGridItem}
+                    onPress={() => handleToolPress(tool)}
+                    activeOpacity={0.75}
+                  >
+                    {/* Circular Tool Icon */}
+                    <View style={styles.iconCircleWrapper}>
+                      <View
                         style={[
-                          styles.badgeText,
-                          { color: tool.badgeColor || colors.primary },
+                          styles.toolIconCircle,
+                          { backgroundColor: tool.circleColor },
                         ]}
                       >
-                        {tool.badge}
-                      </Text>
+                        <Text style={styles.toolIconEmoji}>{tool.icon}</Text>
+                      </View>
+
+                      {/* Tool Badge if present */}
+                      {tool.badge && (
+                        <View
+                          style={[
+                            styles.toolMiniBadge,
+                            {
+                              backgroundColor: tool.badgeColor || PRIMARY,
+                            },
+                          ]}
+                        >
+                          <Text style={styles.toolMiniBadgeText}>
+                            {tool.badge}
+                          </Text>
+                        </View>
+                      )}
                     </View>
-                  )}
-                </View>
-                <Text style={styles.toolSubtitle}>{tool.subtitle}</Text>
+
+                    {/* Tool Title */}
+                    <Text style={styles.toolGridTitle} numberOfLines={2}>
+                      {tool.title}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
 
-              <Text style={styles.chevron}>›</Text>
-            </TouchableOpacity>
-          ))}
+              {/* Subtle Section Divider */}
+              {groupIdx < filteredCategories.length - 1 && (
+                <View style={styles.sectionDivider} />
+              )}
+            </View>
+          ))
+        )}
 
-        <Text style={[styles.sectionLabel, { marginTop: 20 }]}>OCR, Signing & Scanning</Text>
-        {tools
-          .filter((t) => t.category !== 'pdf')
-          .map((tool) => (
-            <TouchableOpacity
-              key={tool.id}
-              style={styles.toolCard}
-              onPress={tool.action}
-              activeOpacity={0.75}
-            >
-              <View style={styles.toolIconContainer}>
-                <Text style={styles.toolIcon}>{tool.icon}</Text>
-              </View>
-
-              <View style={styles.toolTextContainer}>
-                <View style={styles.toolTitleRow}>
-                  <Text style={styles.toolTitle}>{tool.title}</Text>
-                  {tool.badge && (
-                    <View
-                      style={[
-                        styles.badgePill,
-                        { backgroundColor: tool.badgeColor ? `${tool.badgeColor}20` : '#EDE9FE' },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.badgeText,
-                          { color: tool.badgeColor || colors.primary },
-                        ]}
-                      >
-                        {tool.badge}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-                <Text style={styles.toolSubtitle}>{tool.subtitle}</Text>
-              </View>
-
-              <Text style={styles.chevron}>›</Text>
-            </TouchableOpacity>
-          ))}
+        {/* Security & Offline Trust Banner */}
+        <View style={styles.trustBanner}>
+          <View style={styles.trustIconCircle}>
+            <Text style={styles.trustIconText}>🛡️</Text>
+          </View>
+          <View style={styles.trustInfo}>
+            <Text style={styles.trustTitle}>Private, On-Device PDF Processing</Text>
+            <Text style={styles.trustSub}>
+              All documents are processed locally without internet transmission or cloud leaks.
+            </Text>
+          </View>
+        </View>
       </ScrollView>
-
-      {/* PDF Tools Modal */}
-      <PdfToolsModal
-        visible={pdfToolsVisible}
-        initialPages={pdfPages}
-        documentTitle={activeDocTitle}
-        onExport={async (format, options, finalPages) => {
-          setPdfToolsVisible(false);
-          setLoading(true);
-          setLoadingText(`Saving ${format.toUpperCase()} to My Documents...`);
-
-          try {
-            const fileName = `${options.title || activeDocTitle || 'Scanned_Doc'}_${Date.now()}.${format}`;
-            let fileUri = finalPages[0]?.uri;
-            let fileSizeBytes = 1024 * finalPages.length * 200;
-
-            if (format === 'pdf') {
-              const pdfRes = await pdfService.createPdfFromPages(finalPages, options);
-              fileSizeBytes = pdfRes.fileSizeBytes;
-
-              // Save to actual file on disk if native module available
-              if (NativeModules.InAppCameraModule?.saveBase64ToFile) {
-                try {
-                  const savedPath = await NativeModules.InAppCameraModule.saveBase64ToFile(
-                    pdfRes.base64DataUri,
-                    fileName,
-                    'application/pdf'
-                  );
-                  if (savedPath) fileUri = savedPath;
-                } catch (e) {
-                  console.warn('Native saveBase64ToFile error:', e);
-                }
-              }
-            }
-
-            // Save to My Documents (local cache & backend sync)
-            const newDoc: DocumentItem = {
-              _id: `doc_${format}_${Date.now()}`,
-              userId: 'usr_default',
-              name: fileName,
-              originalFileName: fileName,
-              fileType: format === 'pdf' ? 'pdf' : format === 'png' ? 'png' : 'jpg',
-              mimeType: format === 'pdf' ? 'application/pdf' : `image/${format}`,
-              fileSizeBytes,
-              storageKey: `documents/${fileName}`,
-              category: 'Personal Documents',
-              tags: ['tools', format, 'scanned'],
-              status: 'available',
-              localUri: fileUri,
-              thumbnailUrl: finalPages[0]?.uri,
-              pageCount: finalPages.length,
-              pages: finalPages.map((p) => p.uri),
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            };
-
-            const cached = await AsyncStorage.getItem('@fic_locker_offline_docs');
-            const list: DocumentItem[] = cached ? JSON.parse(cached) : [];
-            list.unshift(newDoc);
-            await AsyncStorage.setItem('@fic_locker_offline_docs', JSON.stringify(list));
-
-            // Background sync to backend
-            try {
-              documentService.syncOfflineDocuments().catch(() => {});
-            } catch {}
-
-            setLoading(false);
-
-            // Dialog with Direct Share & View Options
-            Alert.alert(
-              'Saved to My Documents',
-              `"${fileName}" (${Math.round(fileSizeBytes / 1024)} KB, ${finalPages.length} pages) has been saved as a ${format.toUpperCase()} in My Documents.`,
-              [
-                {
-                  text: '📁 View in My Docs',
-                  onPress: () => {
-                    navigation.navigate('MainTabs', { screen: 'DocumentsTab' });
-                  },
-                },
-                {
-                  text: `📤 Share ${format.toUpperCase()}`,
-                  onPress: async () => {
-                    await shareService.shareDocument(newDoc);
-                  },
-                },
-                {
-                  text: 'Done',
-                  style: 'cancel',
-                },
-              ]
-            );
-          } catch (err: any) {
-            setLoading(false);
-            Alert.alert('Save Error', err.message || 'Failed to save exported document.');
-          }
-        }}
-        onClose={() => setPdfToolsVisible(false)}
-      />
-
-      {/* OCR Viewer Modal */}
-      <OcrViewerModal
-        visible={ocrModalVisible}
-        imageUri={ocrImageUri}
-        existingOcrText={extractedOcrText}
-        onClose={() => setOcrModalVisible(false)}
-      />
-
-      {/* Signature Modal */}
-      <SignatureModal
-        visible={sigModalVisible}
-        onSave={(sigUri) => {
-          setSigModalVisible(false);
-          Alert.alert('Signature Saved', 'Digital signature created successfully.');
-        }}
-        onCancel={() => setSigModalVisible(false)}
-      />
-
-      {/* Watermark Modal */}
-      <WatermarkModal
-        visible={watermarkModalVisible}
-        onApply={(wm) => {
-          setWatermarkModalVisible(false);
-          Alert.alert('Watermark Configured', `Watermark text "${wm.text}" configured.`);
-        }}
-        onCancel={() => setWatermarkModalVisible(false)}
-      />
     </View>
   );
 };
@@ -430,105 +252,308 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8F9FE',
   },
   header: {
+    backgroundColor: PRIMARY,
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 12 : 54,
+    paddingBottom: 18,
     paddingHorizontal: 20,
-    paddingTop: 18,
-    paddingBottom: 14,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    ...shadows.card,
   },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: typography.fontWeights.bold,
-    color: colors.text,
-  },
-  headerSubtitle: {
-    fontSize: typography.fontSizes.sm,
-    color: colors.textSecondary,
-    marginTop: 4,
-  },
-  loadingCard: {
+  headerTopRow: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#EDE9FE',
-    marginHorizontal: 20,
-    marginTop: 12,
-    padding: 12,
-    borderRadius: borderRadius.md,
+    marginBottom: 8,
   },
-  loadingCardText: {
-    marginLeft: 10,
-    fontSize: typography.fontSizes.sm,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 32,
-  },
-  sectionLabel: {
-    fontSize: typography.fontSizes.sm,
-    fontWeight: '700',
-    color: colors.textSecondary,
-    marginBottom: 10,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  toolCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: borderRadius.lg,
-    padding: 14,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#F3F4F6',
-    ...shadows.subtle,
-  },
-  toolIconContainer: {
-    width: 44,
-    height: 44,
+  brandBadge: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     borderRadius: 12,
-    backgroundColor: '#F8F9FE',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.35)',
   },
-  toolIcon: {
-    fontSize: 22,
+  brandBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: 0.6,
   },
-  toolTextContainer: {
-    flex: 1,
-  },
-  toolTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 3,
-  },
-  toolTitle: {
-    fontSize: typography.fontSizes.base,
-    fontWeight: typography.fontWeights.bold,
-    color: colors.text,
-    marginRight: 8,
-  },
-  badgePill: {
+  offlinePill: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: borderRadius.pill,
+    paddingVertical: 3,
+    borderRadius: 10,
   },
-  badgeText: {
+  offlinePillText: {
     fontSize: 10,
     fontWeight: '700',
+    color: '#FFFFFF',
   },
-  toolSubtitle: {
-    fontSize: typography.fontSizes.xs,
-    color: colors.textSecondary,
+  headerTitle: {
+    fontSize: 26,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    letterSpacing: -0.5,
+  },
+  headerSubtitle: {
+    fontSize: 12,
+    color: '#E0D7FE',
+    marginTop: 4,
     lineHeight: 16,
   },
-  chevron: {
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: borderRadius.md,
+    paddingHorizontal: 12,
+    paddingVertical: Platform.OS === 'ios' ? 8 : 2,
+    marginTop: 14,
+    ...shadows.subtle,
+  },
+  searchIcon: {
+    fontSize: 14,
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: '#111827',
+    paddingVertical: 6,
+  },
+  clearSearchBtn: {
+    padding: 4,
+  },
+  clearSearchText: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  categoryBarWrapper: {
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+    paddingVertical: 8,
+  },
+  categoryBar: {
+    paddingHorizontal: 14,
+    gap: 8,
+  },
+  categoryPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    gap: 6,
+  },
+  categoryPillActive: {
+    backgroundColor: PRIMARY,
+    borderColor: PRIMARY,
+  },
+  categoryPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4B5563',
+  },
+  categoryPillTextActive: {
+    color: '#FFFFFF',
+  },
+  pillCountBadge: {
+    backgroundColor: '#E5E7EB',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 10,
+  },
+  pillCountBadgeActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  pillCountText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#6B7280',
+  },
+  pillCountTextActive: {
+    color: '#FFFFFF',
+  },
+  contentContainer: {
+    padding: 16,
+    paddingBottom: 40,
+  },
+  categorySection: {
+    marginBottom: 8,
+  },
+  categoryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
+    paddingHorizontal: 2,
+  },
+  categoryTitleCol: {
+    flex: 1,
+  },
+  categoryTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  categoryDesc: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  categoryToolBadge: {
+    backgroundColor: PRIMARY_SOFT,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E0D7FE',
+  },
+  categoryToolBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: PRIMARY,
+  },
+  toolsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-start',
+    backgroundColor: '#FFFFFF',
+    borderRadius: borderRadius.lg,
+    paddingVertical: 14,
+    paddingHorizontal: 6,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    ...shadows.card,
+  },
+  toolGridItem: {
+    width: '25%', // 4 Columns
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+  },
+  iconCircleWrapper: {
+    position: 'relative',
+    marginBottom: 6,
+  },
+  toolIconCircle: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  toolIconEmoji: {
     fontSize: 22,
-    color: '#9CA3AF',
-    marginLeft: 8,
+  },
+  toolMiniBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -8,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+  },
+  toolMiniBadgeText: {
+    fontSize: 8,
+    fontWeight: '900',
+    color: '#FFFFFF',
+  },
+  toolGridTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#1F2937',
+    textAlign: 'center',
+    lineHeight: 14,
+    height: 28,
+  },
+  sectionDivider: {
+    height: 1,
+    backgroundColor: '#E5E7EB',
+    marginVertical: 16,
+    marginHorizontal: 10,
+  },
+  emptyContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyEmoji: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  emptySubtitle: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginTop: 6,
+    marginBottom: 16,
+  },
+  resetSearchBtn: {
+    backgroundColor: PRIMARY,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  resetSearchText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  trustBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: PRIMARY_SOFT,
+    borderWidth: 1,
+    borderColor: '#E0D7FE',
+    borderRadius: borderRadius.md,
+    padding: 12,
+    marginTop: 10,
+    gap: 12,
+  },
+  trustIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: PRIMARY,
+  },
+  trustIconText: {
+    fontSize: 18,
+  },
+  trustInfo: {
+    flex: 1,
+  },
+  trustTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: PRIMARY,
+  },
+  trustSub: {
+    fontSize: 10,
+    color: colors.textSecondary,
+    marginTop: 2,
+    lineHeight: 14,
   },
 });

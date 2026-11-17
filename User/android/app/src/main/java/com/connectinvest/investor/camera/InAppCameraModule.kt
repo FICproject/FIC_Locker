@@ -1,6 +1,8 @@
 package com.connectinvest.investor.camera
 
 import android.Manifest
+import android.app.Activity
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -9,14 +11,19 @@ import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Rect
+import android.graphics.pdf.PdfDocument
+import android.graphics.pdf.PdfRenderer
 import android.media.ExifInterface
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import androidx.core.content.ContextCompat
+import com.facebook.react.bridge.ActivityEventListener
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import java.io.File
 import java.io.FileOutputStream
@@ -27,7 +34,61 @@ import kotlin.math.max
 import kotlin.math.min
 
 class InAppCameraModule(reactContext: ReactApplicationContext) :
-    ReactContextBaseJavaModule(reactContext) {
+    ReactContextBaseJavaModule(reactContext), ActivityEventListener {
+
+    private var pickDocumentPromise: Promise? = null
+    private val PICK_DOCUMENT_REQUEST = 9182
+
+    init {
+        reactContext.addActivityEventListener(this)
+    }
+
+    override fun onActivityResult(activity: Activity?, requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == PICK_DOCUMENT_REQUEST) {
+            val promise = pickDocumentPromise ?: return
+            pickDocumentPromise = null
+
+            if (resultCode == Activity.RESULT_OK && data != null && data.data != null) {
+                val uri = data.data!!
+                try {
+                    var fileName = "Document_${System.currentTimeMillis()}"
+                    var fileSize = 0L
+
+                    val cursor = reactApplicationContext.contentResolver.query(uri, null, null, null, null)
+                    cursor?.use {
+                        if (it.moveToFirst()) {
+                            val nameIndex = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                            val sizeIndex = it.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                            if (nameIndex != -1) fileName = it.getString(nameIndex) ?: fileName
+                            if (sizeIndex != -1) fileSize = it.getLong(sizeIndex)
+                        }
+                    }
+
+                    val cachedFile = File(reactApplicationContext.cacheDir, fileName)
+                    reactApplicationContext.contentResolver.openInputStream(uri)?.use { input ->
+                        FileOutputStream(cachedFile).use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    if (fileSize == 0L) fileSize = cachedFile.length()
+
+                    val result = Arguments.createMap().apply {
+                        putString("uri", Uri.fromFile(cachedFile).toString())
+                        putString("name", fileName)
+                        putDouble("size", fileSize.toDouble())
+                        putString("type", reactApplicationContext.contentResolver.getType(uri) ?: "")
+                    }
+                    promise.resolve(result)
+                } catch (e: Exception) {
+                    promise.reject("FILE_READ_ERROR", e.message ?: "Failed to read picked file")
+                }
+            } else {
+                promise.resolve(null)
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent?) {}
 
     companion object {
         var activeCameraView: InAppCameraView? = null
@@ -65,7 +126,9 @@ class InAppCameraModule(reactContext: ReactApplicationContext) :
             return
         }
 
-        val quad = view.currentDetectedQuad
+        val sensorQuad = view.currentSensorQuad
+        val viewQuad = view.currentDetectedQuad
+        val quad = sensorQuad
 
         view.capturePhoto(
             onSuccess = { uri, width, height ->
@@ -97,6 +160,28 @@ class InAppCameraModule(reactContext: ReactApplicationContext) :
                     map.putString("paperSize", quad.paperSize)
                     map.putDouble("aspectRatio", quad.aspectRatio)
                     map.putDouble("confidence", quad.confidence)
+                }
+
+                if (viewQuad != null) {
+                    val viewMap = Arguments.createMap().apply {
+                        putMap("tl", Arguments.createMap().apply {
+                            putDouble("x", viewQuad.tl.x.toDouble())
+                            putDouble("y", viewQuad.tl.y.toDouble())
+                        })
+                        putMap("tr", Arguments.createMap().apply {
+                            putDouble("x", viewQuad.tr.x.toDouble())
+                            putDouble("y", viewQuad.tr.y.toDouble())
+                        })
+                        putMap("br", Arguments.createMap().apply {
+                            putDouble("x", viewQuad.br.x.toDouble())
+                            putDouble("y", viewQuad.br.y.toDouble())
+                        })
+                        putMap("bl", Arguments.createMap().apply {
+                            putDouble("x", viewQuad.bl.x.toDouble())
+                            putDouble("y", viewQuad.bl.y.toDouble())
+                        })
+                    }
+                    map.putMap("viewCorners", viewMap)
                 }
                 promise.resolve(map)
             },
@@ -392,6 +477,74 @@ class InAppCameraModule(reactContext: ReactApplicationContext) :
     }
 
     /**
+     * Detects document corners directly on an image using OpenCV
+     */
+    @ReactMethod
+    fun detectDocumentOnImage(imageUri: String, promise: Promise) {
+        Thread {
+            try {
+                val bitmap = loadOrientedBitmap(imageUri)
+                if (bitmap == null) {
+                    promise.reject("DECODE_ERROR", "Could not decode image from URI: $imageUri")
+                    return@Thread
+                }
+
+                val cvResult = if (DocumentDetectorOpenCV.isReady()) {
+                    DocumentDetectorOpenCV.detectDocumentBitmap(bitmap)
+                } else null
+
+                val result = Arguments.createMap()
+                result.putInt("imageWidth", bitmap.width)
+                result.putInt("imageHeight", bitmap.height)
+
+                if (cvResult != null) {
+                    result.putBoolean("detected", true)
+                    result.putString("paperSize", cvResult.paperSize)
+                    result.putDouble("aspectRatio", cvResult.aspectRatio)
+                    result.putDouble("confidence", cvResult.confidence)
+
+                    val cornersMap = Arguments.createMap().apply {
+                        putMap("tl", Arguments.createMap().apply {
+                            putDouble("x", cvResult.tl.x.toDouble())
+                            putDouble("y", cvResult.tl.y.toDouble())
+                        })
+                        putMap("tr", Arguments.createMap().apply {
+                            putDouble("x", cvResult.tr.x.toDouble())
+                            putDouble("y", cvResult.tr.y.toDouble())
+                        })
+                        putMap("br", Arguments.createMap().apply {
+                            putDouble("x", cvResult.br.x.toDouble())
+                            putDouble("y", cvResult.br.y.toDouble())
+                        })
+                        putMap("bl", Arguments.createMap().apply {
+                            putDouble("x", cvResult.bl.x.toDouble())
+                            putDouble("y", cvResult.bl.y.toDouble())
+                        })
+                    }
+                    result.putMap("corners", cornersMap)
+                } else {
+                    result.putBoolean("detected", false)
+                    // Centered 5% margin fallback corners
+                    val defaultMap = Arguments.createMap().apply {
+                        putMap("tl", Arguments.createMap().apply { putDouble("x", 0.05); putDouble("y", 0.05) })
+                        putMap("tr", Arguments.createMap().apply { putDouble("x", 0.95); putDouble("y", 0.05) })
+                        putMap("br", Arguments.createMap().apply { putDouble("x", 0.95); putDouble("y", 0.95) })
+                        putMap("bl", Arguments.createMap().apply { putDouble("x", 0.05); putDouble("y", 0.95) })
+                    }
+                    result.putMap("corners", defaultMap)
+                    result.putString("paperSize", "A4")
+                    result.putDouble("aspectRatio", 1.414)
+                    result.putDouble("confidence", 0.70)
+                }
+
+                promise.resolve(result)
+            } catch (e: Exception) {
+                promise.reject("DETECT_ERROR", e.message ?: "Failed to detect document on image")
+            }
+        }.start()
+    }
+
+    /**
      * Auto Detects Document Edges, Auto-Crops, and Analyzes Paper Size (A4, A3, A5, etc.)
      */
     @ReactMethod
@@ -404,16 +557,84 @@ class InAppCameraModule(reactContext: ReactApplicationContext) :
                     return@Thread
                 }
 
-                // 1. Detect Document Boundaries
+                val origW = bitmap.width
+                val origH = bitmap.height
+
+                // 1. Detect Document Boundaries with OpenCV
+                val cvResult = if (DocumentDetectorOpenCV.isReady()) {
+                    DocumentDetectorOpenCV.detectDocumentBitmap(bitmap)
+                } else null
+
+                if (cvResult != null) {
+                    val cvPts = arrayOf(
+                        org.opencv.core.Point(cvResult.tl.x.toDouble() * origW, cvResult.tl.y.toDouble() * origH),
+                        org.opencv.core.Point(cvResult.tr.x.toDouble() * origW, cvResult.tr.y.toDouble() * origH),
+                        org.opencv.core.Point(cvResult.br.x.toDouble() * origW, cvResult.br.y.toDouble() * origH),
+                        org.opencv.core.Point(cvResult.bl.x.toDouble() * origW, cvResult.bl.y.toDouble() * origH)
+                    )
+                    val warped = DocumentDetectorOpenCV.warpPerspective(bitmap, cvPts, cvResult.paperSize) ?: bitmap
+                    val outFile = File(reactApplicationContext.cacheDir, "FIC_WARP_${System.currentTimeMillis()}.jpg")
+                    val fos = FileOutputStream(outFile)
+                    warped.compress(Bitmap.CompressFormat.JPEG, 95, fos)
+                    fos.flush()
+                    fos.close()
+
+                    val analysis = analyzePaperSize(warped.width, warped.height)
+                    val result = Arguments.createMap().apply {
+                        putString("originalUri", imageUri)
+                        putString("croppedUri", Uri.fromFile(outFile).toString())
+                        putInt("originalWidth", origW)
+                        putInt("originalHeight", origH)
+                        putInt("croppedWidth", warped.width)
+                        putInt("croppedHeight", warped.height)
+                        putString("paperSize", cvResult.paperSize)
+                        putString("paperName", analysis.paperName)
+                        putString("paperDimensions", analysis.dimensions)
+                        putDouble("aspectRatio", cvResult.aspectRatio)
+                        putDouble("confidence", cvResult.confidence)
+                        putBoolean("isIsoSeries", analysis.isIsoSeries)
+
+                        val cornersMap = Arguments.createMap().apply {
+                            putMap("tl", Arguments.createMap().apply {
+                                putDouble("x", cvResult.tl.x.toDouble())
+                                putDouble("y", cvResult.tl.y.toDouble())
+                            })
+                            putMap("tr", Arguments.createMap().apply {
+                                putDouble("x", cvResult.tr.x.toDouble())
+                                putDouble("y", cvResult.tr.y.toDouble())
+                            })
+                            putMap("br", Arguments.createMap().apply {
+                                putDouble("x", cvResult.br.x.toDouble())
+                                putDouble("y", cvResult.br.y.toDouble())
+                            })
+                            putMap("bl", Arguments.createMap().apply {
+                                putDouble("x", cvResult.bl.x.toDouble())
+                                putDouble("y", cvResult.bl.y.toDouble())
+                            })
+                        }
+                        putMap("detectedCorners", cornersMap)
+
+                        val cropBox = Arguments.createMap().apply {
+                            putDouble("left", min(cvResult.tl.x, cvResult.bl.x).toDouble())
+                            putDouble("top", min(cvResult.tl.y, cvResult.tr.y).toDouble())
+                            putDouble("right", max(cvResult.tr.x, cvResult.br.x).toDouble())
+                            putDouble("bottom", max(cvResult.bl.y, cvResult.br.y).toDouble())
+                        }
+                        putMap("normalizedBounds", cropBox)
+
+                        val suggestedArray = Arguments.createArray()
+                        analysis.suggestedSizes.forEach { suggestedArray.pushString(it) }
+                        putArray("suggestedSizes", suggestedArray)
+                    }
+                    promise.resolve(result)
+                    return@Thread
+                }
+
+                // Fallback to bounding rectangle
                 val bounds = detectDocumentBounds(bitmap)
-
-                // 2. Analyze Paper Size (A4, A3, A5, Letter, ID, etc.)
                 val analysis = analyzePaperSize(bounds.width(), bounds.height())
-
-                // 3. Auto Crop Bitmap
                 val (croppedUri, dims) = saveCroppedBitmap(bitmap, bounds)
 
-                // 4. Return complete result
                 val result = Arguments.createMap()
                 result.putString("originalUri", imageUri)
                 result.putString("croppedUri", croppedUri)
@@ -422,7 +643,7 @@ class InAppCameraModule(reactContext: ReactApplicationContext) :
                 result.putInt("croppedWidth", dims.first)
                 result.putInt("croppedHeight", dims.second)
 
-                result.putString("paperSize", analysis.paperSize) // "A4", "A3", "A5", "Letter", "ID"
+                result.putString("paperSize", analysis.paperSize)
                 result.putString("paperName", analysis.paperName)
                 result.putString("paperDimensions", analysis.dimensions)
                 result.putDouble("aspectRatio", analysis.aspectRatio)
@@ -531,7 +752,7 @@ class InAppCameraModule(reactContext: ReactApplicationContext) :
                         org.opencv.core.Point(brX.toDouble(), brY.toDouble()),
                         org.opencv.core.Point(blX.toDouble(), blY.toDouble())
                     )
-                    DocumentDetectorOpenCV.warpPerspective(bitmap, cvPts) ?: run {
+                    DocumentDetectorOpenCV.warpPerspective(bitmap, cvPts, paperPreset) ?: run {
                         val matrix = Matrix()
                         matrix.setPolyToPoly(src, 0, dst, 0, 4)
                         val fallback = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
@@ -724,5 +945,298 @@ class InAppCameraModule(reactContext: ReactApplicationContext) :
         } catch (e: Exception) {
             promise.reject("SHARE_FAILED", e.message ?: "Failed to share file")
         }
+    }
+
+    /**
+     * Saves an image file directly into the device's external Pictures / Gallery directory
+     */
+    @ReactMethod
+    fun saveImageToGallery(imageUri: String, fileName: String, promise: Promise) {
+        Thread {
+            try {
+                val bitmap = loadOrientedBitmap(imageUri)
+                if (bitmap == null) {
+                    promise.reject("LOAD_FAILED", "Could not load image to save to gallery")
+                    return@Thread
+                }
+
+                val cleanName = if (fileName.isNotEmpty()) fileName.replace(".pdf", "") else "FIC_DOC_${System.currentTimeMillis()}"
+                val displayName = "$cleanName.jpg"
+                val resolver = reactApplicationContext.contentResolver
+
+                val contentValues = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, displayName)
+                    put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                        put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, android.os.Environment.DIRECTORY_PICTURES + "/FIC_Locker")
+                        put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
+                    }
+                }
+
+                val imageCollection = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    android.provider.MediaStore.Images.Media.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                } else {
+                    android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                }
+
+                val uri = resolver.insert(imageCollection, contentValues)
+                if (uri == null) {
+                    promise.reject("INSERT_FAILED", "Failed to create gallery entry")
+                    return@Thread
+                }
+
+                val outputStream = resolver.openOutputStream(uri)
+                if (outputStream == null) {
+                    promise.reject("STREAM_FAILED", "Failed to open output stream")
+                    return@Thread
+                }
+
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 95, outputStream)
+                outputStream.flush()
+                outputStream.close()
+
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    contentValues.clear()
+                    contentValues.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
+                    resolver.update(uri, contentValues, null, null)
+                } else {
+                    android.media.MediaScannerConnection.scanFile(
+                        reactApplicationContext,
+                        arrayOf(uri.path),
+                        arrayOf("image/jpeg"),
+                        null
+                    )
+                }
+
+                promise.resolve(uri.toString())
+            } catch (e: Exception) {
+                promise.reject("SAVE_FAILED", e.message ?: "Failed to save image to gallery")
+            }
+        }.start()
+    }
+
+    /**
+     * Launches Android's native file picker to pick any document (PDF, DOCX, XLSX, TXT, etc.)
+     */
+    @ReactMethod
+    fun pickDocumentFile(mimeType: String, promise: Promise) {
+        val activity = currentActivity
+        if (activity == null) {
+            promise.reject("NO_ACTIVITY", "Current activity is null")
+            return
+        }
+
+        pickDocumentPromise = promise
+        try {
+            val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                type = if (mimeType.isNotEmpty()) mimeType else "*/*"
+                addCategory(Intent.CATEGORY_OPENABLE)
+                putExtra(Intent.EXTRA_LOCAL_ONLY, true)
+            }
+            activity.startActivityForResult(intent, PICK_DOCUMENT_REQUEST)
+        } catch (e: Exception) {
+            pickDocumentPromise = null
+            promise.reject("PICK_ERROR", e.message ?: "Failed to launch document picker")
+        }
+    }
+
+    /**
+     * Renders each page of a PDF document into a high-res JPEG image in cache
+     */
+    @ReactMethod
+    fun renderPdfPagesToImages(pdfUri: String, promise: Promise) {
+        Thread {
+            var pfd: ParcelFileDescriptor? = null
+            var renderer: PdfRenderer? = null
+            try {
+                val uri = Uri.parse(pdfUri)
+                val file = if (uri.scheme == "file") {
+                    File(uri.path ?: "")
+                } else if (uri.scheme == "content") {
+                    val cached = File(reactApplicationContext.cacheDir, "temp_render_${System.currentTimeMillis()}.pdf")
+                    reactApplicationContext.contentResolver.openInputStream(uri)?.use { input ->
+                        FileOutputStream(cached).use { output -> input.copyTo(output) }
+                    }
+                    cached
+                } else {
+                    File(pdfUri)
+                }
+
+                if (!file.exists()) {
+                    promise.reject("FILE_NOT_FOUND", "PDF file not found: $pdfUri")
+                    return@Thread
+                }
+
+                pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+                renderer = PdfRenderer(pfd)
+                val count = renderer.pageCount
+                val resultArray = Arguments.createArray()
+
+                for (i in 0 until count) {
+                    val page = renderer.openPage(i)
+                    val width = page.width * 2
+                    val height = page.height * 2
+                    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                    val canvas = Canvas(bitmap)
+                    canvas.drawColor(Color.WHITE)
+                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    page.close()
+
+                    val outFile = File(reactApplicationContext.cacheDir, "pdf_page_${System.currentTimeMillis()}_${i + 1}.jpg")
+                    FileOutputStream(outFile).use { fos ->
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, fos)
+                    }
+                    bitmap.recycle()
+
+                    val pageMap = Arguments.createMap().apply {
+                        putInt("pageIndex", i + 1)
+                        putString("uri", Uri.fromFile(outFile).toString())
+                        putInt("width", width)
+                        putInt("height", height)
+                    }
+                    resultArray.pushMap(pageMap)
+                }
+
+                val map = Arguments.createMap().apply {
+                    putInt("pageCount", count)
+                    putArray("pages", resultArray)
+                }
+                promise.resolve(map)
+            } catch (e: Exception) {
+                promise.reject("RENDER_ERROR", e.message ?: "Failed to render PDF pages")
+            } finally {
+                try { renderer?.close() } catch (ignored: Exception) {}
+                try { pfd?.close() } catch (ignored: Exception) {}
+            }
+        }.start()
+    }
+
+    /**
+     * Converts a list of image URIs into a standard multi-page PDF document
+     */
+    @ReactMethod
+    fun convertImagesToPdf(imageUris: ReadableArray, outputFileName: String, pageSize: String, promise: Promise) {
+        Thread {
+            try {
+                val doc = PdfDocument()
+                val cleanName = if (outputFileName.isNotEmpty()) {
+                    if (outputFileName.endsWith(".pdf")) outputFileName else "$outputFileName.pdf"
+                } else {
+                    "Document_${System.currentTimeMillis()}.pdf"
+                }
+                val outFile = File(reactApplicationContext.cacheDir, cleanName)
+
+                for (i in 0 until imageUris.size()) {
+                    val uriStr = imageUris.getString(i) ?: continue
+                    val bmp = loadOrientedBitmap(uriStr) ?: continue
+
+                    // Standard A4: 595 x 842 pt
+                    val pageW = if (pageSize == "Letter") 612 else 595
+                    val pageH = if (pageSize == "Letter") 792 else 842
+
+                    val pageInfo = PdfDocument.PageInfo.Builder(pageW, pageH, i + 1).create()
+                    val page = doc.startPage(pageInfo)
+
+                    val scale = min(pageW.toFloat() / bmp.width, pageH.toFloat() / bmp.height)
+                    val scaledW = bmp.width * scale
+                    val scaledH = bmp.height * scale
+                    val dx = (pageW - scaledW) / 2f
+                    val dy = (pageH - scaledH) / 2f
+
+                    val rect = android.graphics.RectF(dx, dy, dx + scaledW, dy + scaledH)
+                    page.canvas.drawColor(Color.WHITE)
+                    page.canvas.drawBitmap(bmp, null, rect, null)
+                    doc.finishPage(page)
+                    bmp.recycle()
+                }
+
+                FileOutputStream(outFile).use { fos ->
+                    doc.writeTo(fos)
+                }
+                doc.close()
+
+                val map = Arguments.createMap().apply {
+                    putString("uri", Uri.fromFile(outFile).toString())
+                    putString("fileName", cleanName)
+                    putDouble("fileSizeBytes", outFile.length().toDouble())
+                    putInt("pageCount", imageUris.size())
+                }
+                promise.resolve(map)
+            } catch (e: Exception) {
+                promise.reject("CONVERT_ERROR", e.message ?: "Failed to convert images to PDF")
+            }
+        }.start()
+    }
+
+    /**
+     * Merges multiple PDF files into a single consolidated PDF document
+     */
+    @ReactMethod
+    fun mergePdfs(pdfUris: ReadableArray, outputFileName: String, promise: Promise) {
+        Thread {
+            try {
+                val doc = PdfDocument()
+                val cleanName = if (outputFileName.isNotEmpty()) {
+                    if (outputFileName.endsWith(".pdf")) outputFileName else "$outputFileName.pdf"
+                } else {
+                    "Merged_${System.currentTimeMillis()}.pdf"
+                }
+                val outFile = File(reactApplicationContext.cacheDir, cleanName)
+                var totalPages = 0
+
+                for (i in 0 until pdfUris.size()) {
+                    val uriStr = pdfUris.getString(i) ?: continue
+                    val uri = Uri.parse(uriStr)
+                    val file = if (uri.scheme == "file") {
+                        File(uri.path ?: "")
+                    } else if (uri.scheme == "content") {
+                        val temp = File(reactApplicationContext.cacheDir, "merge_src_${i}.pdf")
+                        reactApplicationContext.contentResolver.openInputStream(uri)?.use { inp ->
+                            FileOutputStream(temp).use { out -> inp.copyTo(out) }
+                        }
+                        temp
+                    } else {
+                        File(uriStr)
+                    }
+
+                    if (!file.exists()) continue
+
+                    val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+                    val renderer = PdfRenderer(pfd)
+                    for (p in 0 until renderer.pageCount) {
+                        totalPages++
+                        val page = renderer.openPage(p)
+                        val bmp = Bitmap.createBitmap(page.width, page.height, Bitmap.Config.ARGB_8888)
+                        val canvas = Canvas(bmp)
+                        canvas.drawColor(Color.WHITE)
+                        page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        page.close()
+
+                        val pageInfo = PdfDocument.PageInfo.Builder(bmp.width, bmp.height, totalPages).create()
+                        val pdfPage = doc.startPage(pageInfo)
+                        pdfPage.canvas.drawBitmap(bmp, 0f, 0f, null)
+                        doc.finishPage(pdfPage)
+                        bmp.recycle()
+                    }
+                    renderer.close()
+                    pfd.close()
+                }
+
+                FileOutputStream(outFile).use { fos ->
+                    doc.writeTo(fos)
+                }
+                doc.close()
+
+                val map = Arguments.createMap().apply {
+                    putString("uri", Uri.fromFile(outFile).toString())
+                    putString("fileName", cleanName)
+                    putDouble("fileSizeBytes", outFile.length().toDouble())
+                    putInt("pageCount", totalPages)
+                }
+                promise.resolve(map)
+            } catch (e: Exception) {
+                promise.reject("MERGE_ERROR", e.message ?: "Failed to merge PDFs")
+            }
+        }.start()
     }
 }

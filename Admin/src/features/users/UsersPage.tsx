@@ -13,7 +13,7 @@ import {
   X,
   ExternalLink,
 } from 'lucide-react';
-import type { AdminDocumentRecord, AdminUserDetail, AdminUserSummary } from '@docscanner/shared-types';
+import type { AdminDocumentRecord, AdminUserDetail, AdminUserSummary, CategoryRecord } from '@docscanner/shared-types';
 import { adminApi } from '../../services/adminApi';
 import { extractErrorMessage } from '../../lib/apiClient';
 import { useAdminLiveSync } from '../../hooks/useAdminLiveSync';
@@ -56,6 +56,8 @@ export function UsersPage() {
   const [actionBusy, setActionBusy] = useState(false);
 
   // User documents viewer drawer/modal state
+  const [categories, setCategories] = useState<CategoryRecord[]>([]);
+  const [userDocsCategory, setUserDocsCategory] = useState('');
   const [docsModalUser, setDocsModalUser] = useState<AdminUserSummary | AdminUserDetail | null>(null);
   const [userDocs, setUserDocs] = useState<AdminDocumentRecord[]>([]);
   const [userDocsLoading, setUserDocsLoading] = useState(false);
@@ -93,12 +95,17 @@ export function UsersPage() {
     loadUsers();
   }, [loadUsers]);
 
+  useEffect(() => {
+    adminApi.categories.list().then(setCategories).catch(() => {});
+  }, []);
+
   // Load documents for a specific user
-  const loadUserDocuments = useCallback(async (userId: string, p = 1) => {
+  const loadUserDocuments = useCallback(async (userId: string, p = 1, categoryId = '') => {
     setUserDocsLoading(true);
     try {
       const res = await adminApi.documents.list({
         userId,
+        categoryId: categoryId || undefined,
         page: p,
         limit: 10,
       });
@@ -117,7 +124,8 @@ export function UsersPage() {
     setDocsModalUser(u);
     setPreviewDoc(null);
     setPreviewUrl(null);
-    loadUserDocuments(u._id, 1);
+    setUserDocsCategory('');
+    loadUserDocuments(u._id, 1, '');
   };
 
   useAdminLiveSync(() => {
@@ -126,7 +134,7 @@ export function UsersPage() {
       adminApi.users.getById(selectedUser._id).then(setSelectedUser).catch(() => {});
     }
     if (docsModalUser?._id) {
-      loadUserDocuments(docsModalUser._id, userDocsPage);
+      loadUserDocuments(docsModalUser._id, userDocsPage, userDocsCategory);
     }
   });
 
@@ -364,7 +372,26 @@ export function UsersPage() {
                 <span className="font-bold text-[#0646A0]">{userDocsTotal} document(s)</span> using{' '}
                 <span className="font-bold">{formatBytes(docsModalUser.storageUsedBytes)}</span> of cloud storage.
               </div>
-              <div className="text-xs text-[#64748B]">Audited Admin Access</div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-slate-600">Category:</span>
+                <select
+                  value={userDocsCategory}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setUserDocsCategory(next);
+                    loadUserDocuments(docsModalUser._id, 1, next);
+                  }}
+                  className="text-xs bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                >
+                  <option value="">All Categories</option>
+                  {categories.map((c) => (
+                    <option key={c._id || c.name} value={c._id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <div className="text-xs text-[#64748B] ml-2">Audited Admin Access</div>
+              </div>
             </div>
 
             {/* Document Preview Pane if active */}
@@ -477,7 +504,7 @@ export function UsersPage() {
                   page={userDocsPage}
                   totalPages={userDocsTotalPages}
                   total={userDocsTotal}
-                  onPageChange={(p) => docsModalUser && loadUserDocuments(docsModalUser._id, p)}
+                  onPageChange={(p) => docsModalUser && loadUserDocuments(docsModalUser._id, p, userDocsCategory)}
                 />
               </div>
             )}

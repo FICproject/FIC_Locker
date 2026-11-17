@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Share, Alert } from 'react-native';
 import { DocumentItem, FolderItem } from '../types';
+import { deduplicateDocuments } from '../utils/documentUtils';
 
 export interface BackupArchive {
   version: string;
@@ -98,11 +99,7 @@ export const backupService = {
       const existingStr = await AsyncStorage.getItem('@fic_locker_offline_docs');
       const existingList: DocumentItem[] = existingStr ? JSON.parse(existingStr) : [];
 
-      const docMap = new Map<string, DocumentItem>();
-      existingList.forEach((d) => docMap.set(d._id, d));
-      archive.documents.forEach((d) => docMap.set(d._id, d));
-
-      const merged = Array.from(docMap.values());
+      const merged = deduplicateDocuments([...archive.documents, ...existingList]);
       await AsyncStorage.setItem('@fic_locker_offline_docs', JSON.stringify(merged));
 
       // Restore folders

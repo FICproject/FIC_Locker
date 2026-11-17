@@ -11,6 +11,7 @@ import {
   Image,
   PermissionsAndroid,
   Platform,
+  Modal,
 } from 'react-native';
 import { launchImageLibrary } from 'react-native-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -20,11 +21,14 @@ import { DocumentItem, CategoryItem } from '../../types';
 import { DEFAULT_CATEGORIES } from '../../constants';
 import { categoryService } from '../../services/api/categoryService';
 import { UploadIcon } from '../../assets/icons';
+import { useAuth } from '../../context/AuthContext';
+import { deduplicateDocuments } from '../../utils/documentUtils';
 
 export const UploadDocumentScreen: React.FC<{ navigation: any; route: any }> = ({
   navigation,
   route,
 }) => {
+  const { user } = useAuth();
   const prefillName = route.params?.prefillName || '';
   const prefillUri = route.params?.pageUri || '';
   const rotationDeg = route.params?.rotationDeg || 0;
@@ -78,28 +82,34 @@ export const UploadDocumentScreen: React.FC<{ navigation: any; route: any }> = (
     return true;
   };
 
+  const [pickerModalVisible, setPickerModalVisible] = useState(false);
+
   const handlePickOption = () => {
-    Alert.alert('Upload Document', 'Choose how you want to add your document:', [
-      {
-        text: '📸 Scan Document (In-App Scanner)',
-        onPress: () => {
-          navigation.navigate('Scanner');
-        },
-      },
-      {
-        text: '🖼️ Choose from Gallery',
-        onPress: async () => {
-          const res = await launchImageLibrary({ mediaType: 'photo', quality: 0.9 });
-          if (res.assets && res.assets[0]?.uri) {
-            setSelectedImageUri(res.assets[0].uri);
-            if (res.assets[0].fileName) {
-              setDocName(res.assets[0].fileName);
-            }
-          }
-        },
-      },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+    setPickerModalVisible(true);
+  };
+
+  const handleSelectCamera = () => {
+    setPickerModalVisible(false);
+    navigation.navigate('Scanner');
+  };
+
+  const handleSelectGallery = async () => {
+    setPickerModalVisible(false);
+    try {
+      const res = await launchImageLibrary({ mediaType: 'photo', quality: 0.9 });
+      if (res.assets && res.assets[0]?.uri) {
+        setSelectedImageUri(res.assets[0].uri);
+        if (res.assets[0].fileName) {
+          setDocName(res.assets[0].fileName);
+        }
+      }
+    } catch (err: any) {
+      Alert.alert('Gallery Error', err.message || 'Failed to open gallery');
+    }
+  };
+
+  const handleClosePicker = () => {
+    setPickerModalVisible(false);
   };
 
   // Upload progress states
@@ -155,7 +165,7 @@ export const UploadDocumentScreen: React.FC<{ navigation: any; route: any }> = (
       const newDocItem: DocumentItem = {
         ...(confirmedDoc || {}),
         _id: authRes.documentId || confirmedDoc?._id || `doc_${Date.now()}`,
-        userId: 'usr_default',
+        userId: user?._id || '',
         name: docName.trim(),
         originalFileName: docName.trim(),
         fileType: isPdf ? 'pdf' : 'jpg',
@@ -178,8 +188,8 @@ export const UploadDocumentScreen: React.FC<{ navigation: any; route: any }> = (
       try {
         const cached = await AsyncStorage.getItem('@fic_locker_offline_docs');
         const list = cached ? JSON.parse(cached) : [];
-        list.unshift(newDocItem);
-        await AsyncStorage.setItem('@fic_locker_offline_docs', JSON.stringify(list));
+        const cleanList = deduplicateDocuments([newDocItem, ...list]);
+        await AsyncStorage.setItem('@fic_locker_offline_docs', JSON.stringify(cleanList));
       } catch {
         // ignore cache write error
       }
@@ -187,7 +197,13 @@ export const UploadDocumentScreen: React.FC<{ navigation: any; route: any }> = (
       setProgress(100);
       setUploadStatus('available');
 
-      Alert.alert('Upload Complete', 'Your document has been securely saved and added to My Documents!', [
+      Alert.alert('Upload Complete', `Your document has been securely saved under "${category}"!`, [
+        {
+          text: '📁 View in Category',
+          onPress: () => {
+            navigation.navigate('CategoryDetail', { category });
+          },
+        },
         {
           text: 'View My Documents',
           onPress: () => {
@@ -214,7 +230,7 @@ export const UploadDocumentScreen: React.FC<{ navigation: any; route: any }> = (
       // Fallback: save to local offline documents so scan is never lost
       const localDocItem: DocumentItem = {
         _id: `doc_local_${Date.now()}`,
-        userId: 'usr_default',
+        userId: user?._id || '',
         name: docName.trim(),
         originalFileName: docName.trim(),
         fileType: isPdf ? 'pdf' : 'jpg',
@@ -236,14 +252,20 @@ export const UploadDocumentScreen: React.FC<{ navigation: any; route: any }> = (
       try {
         const cached = await AsyncStorage.getItem('@fic_locker_offline_docs');
         const list = cached ? JSON.parse(cached) : [];
-        list.unshift(localDocItem);
-        await AsyncStorage.setItem('@fic_locker_offline_docs', JSON.stringify(list));
+        const cleanList = deduplicateDocuments([localDocItem, ...list]);
+        await AsyncStorage.setItem('@fic_locker_offline_docs', JSON.stringify(cleanList));
       } catch {}
 
       setProgress(100);
       setUploadStatus('available');
 
-      Alert.alert('Document Saved', 'Your document has been securely saved to My Documents!', [
+      Alert.alert('Document Saved', `Your document has been securely saved under "${category}"!`, [
+        {
+          text: '📁 View in Category',
+          onPress: () => {
+            navigation.navigate('CategoryDetail', { category });
+          },
+        },
         {
           text: 'View My Documents',
           onPress: () => {
@@ -259,7 +281,8 @@ export const UploadDocumentScreen: React.FC<{ navigation: any; route: any }> = (
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+    <View style={styles.screenWrapper}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
       {/* Top Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
@@ -395,6 +418,78 @@ export const UploadDocumentScreen: React.FC<{ navigation: any; route: any }> = (
         </TouchableOpacity>
       </View>
     </ScrollView>
+
+    {/* Upload Source Picker Modal (Camera, Gallery, Cancel) in App Color */}
+    <Modal
+      visible={pickerModalVisible}
+      transparent
+      animationType="fade"
+      onRequestClose={handleClosePicker}
+    >
+      <TouchableOpacity
+        style={styles.pickerBackdrop}
+        activeOpacity={1}
+        onPress={handleClosePicker}
+      >
+        <View style={styles.pickerCard}>
+          {/* Header */}
+          <View style={styles.pickerHeader}>
+            <View style={styles.pickerBadge}>
+              <UploadIcon size={26} color={colors.primary} />
+            </View>
+            <Text style={styles.pickerTitle}>Upload Document</Text>
+            <Text style={styles.pickerSubtitle}>
+              Choose how you want to add your document:
+            </Text>
+          </View>
+
+          {/* Options: 1. Camera, 2. Gallery */}
+          <View style={styles.pickerOptionsCol}>
+            {/* 1. Camera / Scan Document */}
+            <TouchableOpacity
+              style={styles.pickerCameraBtn}
+              onPress={handleSelectCamera}
+              activeOpacity={0.85}
+            >
+              <View style={styles.pickerCameraIconWrap}>
+                <Text style={styles.pickerCameraEmoji}>📷</Text>
+              </View>
+              <View style={styles.pickerBtnTextCol}>
+                <Text style={styles.pickerCameraTitle}>Scan Document (Camera)</Text>
+                <Text style={styles.pickerCameraSub}>Auto-detect edges & straighten</Text>
+              </View>
+              <Text style={styles.pickerCameraArrow}>›</Text>
+            </TouchableOpacity>
+
+            {/* 2. Choose from Gallery */}
+            <TouchableOpacity
+              style={styles.pickerGalleryBtn}
+              onPress={handleSelectGallery}
+              activeOpacity={0.85}
+            >
+              <View style={styles.pickerGalleryIconWrap}>
+                <Text style={styles.pickerGalleryEmoji}>🖼️</Text>
+              </View>
+              <View style={styles.pickerBtnTextCol}>
+                <Text style={styles.pickerGalleryTitle}>Choose from Gallery</Text>
+                <Text style={styles.pickerGallerySub}>Select photos or files from device</Text>
+              </View>
+              <Text style={styles.pickerGalleryArrow}>›</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* 3. Cancel */}
+          <TouchableOpacity
+            style={styles.pickerCancelBtn}
+            onPress={handleClosePicker}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.pickerCancelBtnText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    </Modal>
+  </View>
   );
 };
 
@@ -583,6 +678,152 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 11,
     fontWeight: 'bold',
+  },
+  screenWrapper: {
+    flex: 1,
+    backgroundColor: '#F8F9FE',
+  },
+  pickerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  pickerCard: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 20,
+    alignItems: 'center',
+    ...shadows.card,
+  },
+  pickerHeader: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  pickerBadge: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#F4F0FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    borderWidth: 1.5,
+    borderColor: '#E4DCFD',
+  },
+  pickerTitle: {
+    fontSize: 20,
+    fontWeight: typography.fontWeights.bold,
+    color: '#111827',
+    marginBottom: 6,
+  },
+  pickerSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+    textAlign: 'center',
+  },
+  pickerOptionsCol: {
+    width: '100%',
+    gap: 12,
+    marginBottom: 16,
+  },
+  pickerCameraBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primary || '#6C47FF',
+    borderRadius: borderRadius.lg,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    ...shadows.glow,
+  },
+  pickerCameraIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  pickerCameraEmoji: {
+    fontSize: 20,
+  },
+  pickerBtnTextCol: {
+    flex: 1,
+  },
+  pickerCameraTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 2,
+  },
+  pickerCameraSub: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.85)',
+  },
+  pickerCameraArrow: {
+    fontSize: 22,
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+    marginLeft: 6,
+  },
+  pickerGalleryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: colors.primary || '#6C47FF',
+    borderRadius: borderRadius.lg,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  pickerGalleryIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#F4F0FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  pickerGalleryEmoji: {
+    fontSize: 20,
+  },
+  pickerGalleryTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.primary || '#6C47FF',
+    marginBottom: 2,
+  },
+  pickerGallerySub: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  pickerGalleryArrow: {
+    fontSize: 22,
+    color: colors.primary || '#6C47FF',
+    fontWeight: 'bold',
+    marginLeft: 6,
+  },
+  pickerCancelBtn: {
+    width: '100%',
+    paddingVertical: 13,
+    borderRadius: borderRadius.md,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pickerCancelBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#4B5563',
   },
 });
 

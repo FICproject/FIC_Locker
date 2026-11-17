@@ -1,32 +1,30 @@
 package com.connectinvest.investor.camera
 
 import android.graphics.Bitmap
-import android.graphics.Matrix
 import android.util.Log
 import org.opencv.android.OpenCVLoader
-import org.opencv.core.Core
-import org.opencv.core.CvType
-import org.opencv.core.Mat
-import org.opencv.core.MatOfPoint
-import org.opencv.core.MatOfPoint2f
-import org.opencv.core.Point
-import org.opencv.core.Rect
-import org.opencv.core.Scalar
-import org.opencv.core.Size
+import org.opencv.android.Utils
+import org.opencv.core.*
 import org.opencv.imgproc.Imgproc
 import java.nio.ByteBuffer
-import kotlin.math.abs
-import kotlin.math.acos
-import kotlin.math.hypot
-import kotlin.math.max
-import kotlin.math.min
-import kotlin.math.sqrt
+import kotlin.math.*
 
 /**
- * Professional OpenCV Native Document Detection & Processing Engine
- * Implements real-time Canny edge detection, contour extraction,
- * polygon approximation (approxPolyDP), 9-factor candidate scoring,
- * 4-corner ordering, and hardware perspective transformation.
+ * Professional OpenCV Native Document Detection & Perspective Processing Engine
+ *
+ * Employs a multi-strategy document edge and boundary discovery pipeline:
+ * 1. Aspect-ratio preserving downsampling
+ * 2. Gaussian smoothing to suppress fine textures while preserving outer contours
+ * 3. Multi-strategy paper segmentation:
+ *    - Strategy A: Otsu binarization with morphological text closure (bridges interior text)
+ *    - Strategy B: Adaptive Gaussian thresholding (handles uneven lighting and shadows)
+ *    - Strategy C: High-luminance thresholding (detects white paper on light/wood desks)
+ *    - Strategy D: Canny edge gradient with morphological boundary closure
+ * 4. External contour extraction on closed silhouettes
+ * 5. Convex hull calculation to prevent finger/cable notches from breaking quadrilateral
+ * 6. Multi-scale approxPolyDP polygon approximation with minAreaRect fallback
+ * 7. Centroid polar angle corner ordering (invariant to tilt and rotation)
+ * 8. Candidate scoring and sub-pixel perspective transformation
  */
 object DocumentDetectorOpenCV {
 
@@ -34,19 +32,33 @@ object DocumentDetectorOpenCV {
     private var isOpenCVInitialized = false
 
     init {
+        tryInit()
+    }
+
+    private fun tryInit(): Boolean {
+        if (isOpenCVInitialized) return true
         try {
             isOpenCVInitialized = OpenCVLoader.initDebug()
             if (isOpenCVInitialized) {
-                Log.i(TAG, "OpenCV native library successfully initialized.")
-            } else {
-                Log.e(TAG, "OpenCVLoader.initDebug() returned false.")
+                Log.i(TAG, "OpenCV native library successfully initialized via initDebug().")
+                return true
             }
         } catch (e: Throwable) {
-            Log.e(TAG, "Failed to initialize OpenCV native library", e)
+            Log.w(TAG, "OpenCVLoader.initDebug() failed, trying System.loadLibrary...", e)
         }
+
+        try {
+            System.loadLibrary("opencv_java4")
+            isOpenCVInitialized = true
+            Log.i(TAG, "OpenCV native library loaded via System.loadLibrary(opencv_java4).")
+            return true
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed to load opencv_java4 native library", e)
+        }
+        return false
     }
 
-    fun isReady(): Boolean = isOpenCVInitialized
+    fun isReady(): Boolean = isOpenCVInitialized || tryInit()
 
     data class DetectionResult(
         val tl: DetectedPoint,
@@ -63,7 +75,7 @@ object DocumentDetectorOpenCV {
     )
 
     /**
-     * Analyzes raw Y-plane buffer using native OpenCV computer vision pipeline
+     * Analyzes raw Y-plane buffer from live camera preview
      */
     fun detectDocument(
         buffer: ByteBuffer,
@@ -73,23 +85,13 @@ object DocumentDetectorOpenCV {
         pixelStride: Int,
         rotationDegrees: Int
     ): DetectionResult? {
-        if (!isOpenCVInitialized) return null
+        if (!isReady()) return null
         val startTime = System.currentTimeMillis()
-
-        // Fast downsampled target resolution (240x320 portrait)
-        val targetW = 240
-        val targetH = 320
 
         var rawMat: Mat? = null
         var rotatedMat: Mat? = null
-        var resizedMat: Mat? = null
-        var blurredMat: Mat? = null
-        var edgesMat: Mat? = null
-        var closedMat: Mat? = null
-        var kernel: Mat? = null
 
         try {
-            // 1. Create Mat from Y-plane luminance buffer
             rawMat = Mat(frameH, frameW, CvType.CV_8UC1)
             val yBytes = ByteArray(frameW * frameH)
 
@@ -98,16 +100,19 @@ object DocumentDetectorOpenCV {
                 buffer.get(yBytes, 0, frameW * frameH)
             } else {
                 var offset = 0
+                val cap = buffer.capacity()
                 for (row in 0 until frameH) {
-                    buffer.position(row * rowStride)
-                    for (col in 0 until frameW) {
-                        yBytes[offset++] = buffer.get(row * rowStride + col * pixelStride)
+                    val pos = row * rowStride
+                    if (pos + frameW <= cap) {
+                        buffer.position(pos)
+                        buffer.get(yBytes, offset, frameW)
                     }
+                    offset += frameW
                 }
             }
             rawMat.put(0, 0, yBytes)
 
-            // 2. Rotate Mat according to camera sensor orientation
+            // Rotate Mat to match upright sensor orientation
             rotatedMat = Mat()
             when (rotationDegrees) {
                 90 -> Core.rotate(rawMat, rotatedMat, Core.ROTATE_90_CLOCKWISE)
@@ -116,139 +121,291 @@ object DocumentDetectorOpenCV {
                 else -> rawMat.copyTo(rotatedMat)
             }
 
-            val procW = rotatedMat.cols()
-            val procH = rotatedMat.rows()
+            val result = analyzeGrayscaleMat(rotatedMat, isLiveStream = true)
+            return if (result != null) {
+                result.copy(processingTimeMs = System.currentTimeMillis() - startTime)
+            } else null
+        } catch (e: Exception) {
+            Log.w(TAG, "Live OpenCV detection error:", e)
+            return null
+        } finally {
+            rawMat?.release()
+            rotatedMat?.release()
+        }
+    }
 
-            // 3. Resize to 240x320 for ~6ms processing speed
-            resizedMat = Mat()
-            Imgproc.resize(rotatedMat, resizedMat, Size(targetW.toDouble(), targetH.toDouble()), 0.0, 0.0, Imgproc.INTER_AREA)
+    /**
+     * Analyzes full-resolution captured Bitmap directly
+     */
+    fun detectDocumentBitmap(bitmap: Bitmap): DetectionResult? {
+        if (!isReady()) return null
+        val startTime = System.currentTimeMillis()
 
-            // 4. Gaussian Blur for noise suppression
-            blurredMat = Mat()
-            Imgproc.GaussianBlur(resizedMat, blurredMat, Size(5.0, 5.0), 0.0)
+        var rgbaMat: Mat? = null
+        var grayMat: Mat? = null
 
-            // 5. Adaptive Canny Edge Detection
-            // Estimate median luminance for dynamic thresholds
-            val meanScalar = Core.mean(blurredMat)
-            val medianLum = meanScalar.`val`[0]
-            val lowerCanny = max(15.0, 0.60 * medianLum)
-            val upperCanny = min(220.0, 1.35 * medianLum)
+        try {
+            rgbaMat = Mat()
+            Utils.bitmapToMat(bitmap, rgbaMat)
 
-            edgesMat = Mat()
-            Imgproc.Canny(blurredMat, edgesMat, lowerCanny, upperCanny)
+            grayMat = Mat()
+            if (rgbaMat.channels() >= 3) {
+                Imgproc.cvtColor(rgbaMat, grayMat, Imgproc.COLOR_RGBA2GRAY)
+            } else {
+                rgbaMat.copyTo(grayMat)
+            }
 
-            // 6. Morphological Closing to bridge micro-gaps in paper boundaries
-            kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0))
-            closedMat = Mat()
-            Imgproc.morphologyEx(edgesMat, closedMat, Imgproc.MORPH_CLOSE, kernel)
-            Imgproc.dilate(closedMat, closedMat, kernel)
+            val result = analyzeGrayscaleMat(grayMat, isLiveStream = false)
+            return if (result != null) {
+                result.copy(processingTimeMs = System.currentTimeMillis() - startTime)
+            } else null
+        } catch (e: Exception) {
+            Log.e(TAG, "Bitmap OpenCV detection error:", e)
+            return null
+        } finally {
+            rgbaMat?.release()
+            grayMat?.release()
+        }
+    }
 
-            // 7. Contour Extraction
-            val contours = ArrayList<MatOfPoint>()
-            val hierarchy = Mat()
-            Imgproc.findContours(
-                closedMat,
-                contours,
-                hierarchy,
-                Imgproc.RETR_LIST,
-                Imgproc.CHAIN_APPROX_SIMPLE
-            )
-            hierarchy.release()
+    /**
+     * Core Computer Vision Quadrilateral Detection Algorithm
+     */
+    private fun analyzeGrayscaleMat(srcGray: Mat, isLiveStream: Boolean): DetectionResult? {
+        val origW = srcGray.cols()
+        val origH = srcGray.rows()
+        if (origW < 50 || origH < 50) return null
 
-            if (contours.isEmpty()) return null
+        // Downsample maintaining exact aspect ratio for fast analysis
+        val maxSide = if (isLiveStream) 420.0 else 800.0
+        val scale = maxSide / max(origW, origH)
+        val targetW = (origW * scale).roundToInt().coerceAtLeast(100)
+        val targetH = (origH * scale).roundToInt().coerceAtLeast(100)
+
+        var resized: Mat? = null
+        var blurred: Mat? = null
+
+        // Structuring elements
+        var k3: Mat? = null
+        var k5: Mat? = null
+        var k9: Mat? = null
+
+        try {
+            resized = Mat()
+            Imgproc.resize(srcGray, resized, Size(targetW.toDouble(), targetH.toDouble()), 0.0, 0.0, Imgproc.INTER_AREA)
+
+            blurred = Mat()
+            Imgproc.GaussianBlur(resized, blurred, Size(5.0, 5.0), 0.0)
+
+            k3 = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0))
+            k5 = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(5.0, 5.0))
+            k9 = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(9.0, 9.0))
 
             val totalArea = (targetW * targetH).toDouble()
+            val totalMeanLum = Core.mean(blurred).`val`[0]
+
             var bestScore = 0.0
             var bestCorners: Array<Point>? = null
-            var bestAspectRatio = 1.414
             var bestPaperSize = "A4"
+            var bestAspectRatio = 1.414
 
-            // 8. Polygon Approximation & 9-Factor Candidate Scoring
-            for (contour in contours) {
-                val contour2f = MatOfPoint2f(*contour.toArray())
-                val peri = Imgproc.arcLength(contour2f, true)
-                val approx2f = MatOfPoint2f()
+            // List of candidate binary/edge masks to test
+            val candidateMasks = ArrayList<Mat>()
 
-                // 2% arcLength tolerance for quad approximation
-                Imgproc.approxPolyDP(contour2f, approx2f, 0.025 * peri, true)
+            // Strategy 1: Otsu Thresholding with Morphological Close (Fills all text inside document)
+            try {
+                val binOtsu = Mat()
+                Imgproc.threshold(blurred, binOtsu, 0.0, 255.0, Imgproc.THRESH_BINARY or Imgproc.THRESH_OTSU)
+                val closedOtsu = Mat()
+                Imgproc.morphologyEx(binOtsu, closedOtsu, Imgproc.MORPH_CLOSE, k9)
+                candidateMasks.add(closedOtsu)
+                binOtsu.release()
+            } catch (e: Exception) {}
 
-                if (approx2f.total() == 4L) {
-                    val pts = approx2f.toArray()
-                    val approxInt = MatOfPoint(*pts)
+            // Strategy 2: Adaptive Thresholding with Morphological Close (Shadows & uneven lighting)
+            try {
+                val binAdapt = Mat()
+                Imgproc.adaptiveThreshold(
+                    blurred,
+                    binAdapt,
+                    255.0,
+                    Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C,
+                    Imgproc.THRESH_BINARY,
+                    25,
+                    8.0
+                )
+                val closedAdapt = Mat()
+                Imgproc.morphologyEx(binAdapt, closedAdapt, Imgproc.MORPH_CLOSE, k9)
+                candidateMasks.add(closedAdapt)
+                binAdapt.release()
+            } catch (e: Exception) {}
 
-                    // Must be convex
-                    if (Imgproc.isContourConvex(approxInt)) {
-                        val area = Imgproc.contourArea(approxInt)
-                        val areaRatio = area / totalArea
+            // Strategy 3: High Luminance Threshold (White paper on light gray/wood office desks)
+            try {
+                val highThresh = min(240.0, max(140.0, totalMeanLum + 20.0))
+                val binHigh = Mat()
+                Imgproc.threshold(blurred, binHigh, highThresh, 255.0, Imgproc.THRESH_BINARY)
+                val closedHigh = Mat()
+                Imgproc.morphologyEx(binHigh, closedHigh, Imgproc.MORPH_CLOSE, k9)
+                candidateMasks.add(closedHigh)
+                binHigh.release()
+            } catch (e: Exception) {}
 
-                        // Document must occupy between 10% and 88% of viewfinder
-                        if (areaRatio in 0.10..0.88) {
-                            val ordered = orderCorners(pts)
-                            val score = evaluateCandidate(ordered, targetW, targetH, areaRatio)
+            // Strategy 4: Canny Edge Detection with Morphological Closing
+            try {
+                val cannyEdges = Mat()
+                Imgproc.Canny(blurred, cannyEdges, 35.0, 95.0)
+                val closedCanny = Mat()
+                Imgproc.morphologyEx(cannyEdges, closedCanny, Imgproc.MORPH_CLOSE, k5)
+                candidateMasks.add(closedCanny)
+                cannyEdges.release()
+            } catch (e: Exception) {}
 
-                            if (score > bestScore && score >= 55.0) {
-                                bestScore = score
-                                bestCorners = ordered
+            // Process all candidate masks
+            for (mask in candidateMasks) {
+                val contours = ArrayList<MatOfPoint>()
+                val hierarchy = Mat()
+                Imgproc.findContours(mask, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
+                hierarchy.release()
 
-                                val wTop = dist(ordered[0], ordered[1])
-                                val wBot = dist(ordered[3], ordered[2])
-                                val hLeft = dist(ordered[0], ordered[3])
-                                val hRight = dist(ordered[1], ordered[2])
-                                val avgW = (wTop + wBot) / 2.0
-                                val avgH = (hLeft + hRight) / 2.0
-                                bestAspectRatio = max(avgW, avgH) / max(1.0, min(avgW, avgH))
+                for (contour in contours) {
+                    val area = Imgproc.contourArea(contour)
+                    val areaRatio = area / totalArea
 
-                                bestPaperSize = when {
-                                    abs(bestAspectRatio - 1.414) <= 0.12 -> "A4"
-                                    abs(bestAspectRatio - 1.294) <= 0.08 -> "Letter"
-                                    abs(bestAspectRatio - 1.586) <= 0.10 -> "ID"
-                                    abs(bestAspectRatio - 1.647) <= 0.09 -> "Legal"
-                                    else -> if (bestAspectRatio in 1.15..1.65) "A4" else "Custom"
-                                }
+                    // Document must occupy between 6% and 94% of frame
+                    if (areaRatio < 0.06 || areaRatio > 0.94) {
+                        contour.release()
+                        continue
+                    }
+
+                    val bRect = Imgproc.boundingRect(contour)
+                    // Reject full viewfinder border hugging artifacts
+                    if (bRect.x <= 2 && bRect.y <= 2 && (bRect.x + bRect.width) >= targetW - 2 && (bRect.y + bRect.height) >= targetH - 2) {
+                        contour.release()
+                        continue
+                    }
+
+                    // Compute convex hull
+                    val hullMatOfInt = MatOfInt()
+                    Imgproc.convexHull(contour, hullMatOfInt)
+                    val contourPts = contour.toArray()
+                    val hullIndices = hullMatOfInt.toArray()
+                    val hullPts = Array(hullIndices.size) { i -> contourPts[hullIndices[i]] }
+                    hullMatOfInt.release()
+
+                    val hullContour = MatOfPoint(*hullPts)
+                    val hull2f = MatOfPoint2f(*hullPts)
+                    val peri = Imgproc.arcLength(hull2f, true)
+                    var quadPts: Array<Point>? = null
+
+                    // Test polygon approximations
+                    val tolerances = doubleArrayOf(0.015, 0.020, 0.025, 0.030, 0.040, 0.055, 0.070, 0.085)
+                    for (factor in tolerances) {
+                        val approx2f = MatOfPoint2f()
+                        Imgproc.approxPolyDP(hull2f, approx2f, factor * peri, true)
+
+                        if (approx2f.total() == 4L) {
+                            val pts = approx2f.toArray()
+                            val approxInt = MatOfPoint(*pts)
+                            if (Imgproc.isContourConvex(approxInt)) {
+                                quadPts = pts
+                                approxInt.release()
+                                approx2f.release()
+                                break
+                            }
+                            approxInt.release()
+                        }
+                        approx2f.release()
+                    }
+
+                    // Fallback to minAreaRect if approxPolyDP had slight corner irregularities
+                    if (quadPts == null && areaRatio in 0.08..0.90) {
+                        val rotRect = Imgproc.minAreaRect(hull2f)
+                        val rectPts = Array(4) { Point() }
+                        rotRect.points(rectPts)
+                        quadPts = rectPts
+                    }
+
+                    hullContour.release()
+                    hull2f.release()
+
+                    if (quadPts != null) {
+                        val ordered = orderCorners(quadPts)
+                        val score = evaluateCandidate(ordered, targetW, targetH, areaRatio, blurred, totalMeanLum)
+
+                        if (score > bestScore && score >= 28.0) {
+                            bestScore = score
+                            bestCorners = ordered
+
+                            val wTop = dist(ordered[0], ordered[1])
+                            val wBot = dist(ordered[3], ordered[2])
+                            val hLeft = dist(ordered[0], ordered[3])
+                            val hRight = dist(ordered[1], ordered[2])
+                            val avgW = (wTop + wBot) / 2.0
+                            val avgH = (hLeft + hRight) / 2.0
+                            bestAspectRatio = max(avgW, avgH) / max(1.0, min(avgW, avgH))
+
+                            bestPaperSize = when {
+                                abs(bestAspectRatio - 1.414) <= 0.12 -> "A4"
+                                abs(bestAspectRatio - 1.294) <= 0.08 -> "Letter"
+                                abs(bestAspectRatio - 1.586) <= 0.10 -> "ID"
+                                abs(bestAspectRatio - 1.647) <= 0.09 -> "Legal"
+                                else -> if (bestAspectRatio in 1.15..1.75) "A4" else "Custom"
                             }
                         }
                     }
-                    approxInt.release()
+
+                    contour.release()
                 }
-                contour2f.release()
-                approx2f.release()
-                contour.release()
+
+                mask.release()
             }
 
             if (bestCorners == null) return null
 
-            // 9. Coordinate Normalization to [0.0 .. 1.0]
-            val normTL = DetectedPoint((bestCorners[0].x / targetW).toFloat(), (bestCorners[0].y / targetH).toFloat())
-            val normTR = DetectedPoint((bestCorners[1].x / targetW).toFloat(), (bestCorners[1].y / targetH).toFloat())
-            val normBR = DetectedPoint((bestCorners[2].x / targetW).toFloat(), (bestCorners[2].y / targetH).toFloat())
-            val normBL = DetectedPoint((bestCorners[3].x / targetW).toFloat(), (bestCorners[3].y / targetH).toFloat())
+            // Normalized Coordinates in [0.0 .. 1.0] in upright sensor space
+            val normTL = DetectedPoint(
+                (bestCorners[0].x / targetW).toFloat().coerceIn(0f, 1f),
+                (bestCorners[0].y / targetH).toFloat().coerceIn(0f, 1f)
+            )
+            val normTR = DetectedPoint(
+                (bestCorners[1].x / targetW).toFloat().coerceIn(0f, 1f),
+                (bestCorners[1].y / targetH).toFloat().coerceIn(0f, 1f)
+            )
+            val normBR = DetectedPoint(
+                (bestCorners[2].x / targetW).toFloat().coerceIn(0f, 1f),
+                (bestCorners[2].y / targetH).toFloat().coerceIn(0f, 1f)
+            )
+            val normBL = DetectedPoint(
+                (bestCorners[3].x / targetW).toFloat().coerceIn(0f, 1f),
+                (bestCorners[3].y / targetH).toFloat().coerceIn(0f, 1f)
+            )
 
-            // Margin clearance check (< 3.5% from viewport edges)
-            val isPartial = normTL.x < 0.035f || normTL.y < 0.035f ||
-                    normTR.x > 0.965f || normTR.y < 0.035f ||
-                    normBR.x > 0.965f || normBR.y > 0.965f ||
-                    normBL.x < 0.035f || normBL.y > 0.965f
+            // Margin clearance check (< 1% from frame boundary)
+            val isPartial = normTL.x < 0.01f || normTL.y < 0.01f ||
+                    normTR.x > 0.99f || normTR.y < 0.01f ||
+                    normBR.x > 0.99f || normBR.y > 0.99f ||
+                    normBL.x < 0.01f || normBL.y > 0.99f
 
-            // Area too far check (< 14% of view)
+            // Area too far check (< 7% of frame)
             val normArea = 0.5f * abs(
                 (normTL.x * normTR.y - normTR.x * normTL.y) +
                 (normTR.x * normBR.y - normBR.x * normTR.y) +
                 (normBR.x * normBL.y - normBR.x * normBL.y) +
-                (normBL.x * normTL.y - normBL.x * normBL.y)
+                (normBL.x * normTL.y - normBL.x * normTL.y)
             )
-            val isTooFar = normArea < 0.14f
+            val isTooFar = normArea < 0.07f
 
-            // Skew / Tilt symmetry check
+            // Tilt symmetry check
             val topW = hypot(normTL.x - normTR.x, normTL.y - normTR.y)
             val botW = hypot(normBL.x - normBR.x, normBL.y - normBR.y)
             val leftH = hypot(normTL.x - normBL.x, normTL.y - normBL.y)
             val rightH = hypot(normTR.x - normBR.x, normTR.y - normBR.y)
             val ratioW = max(topW, botW) / max(0.01f, min(topW, botW))
             val ratioH = max(leftH, rightH) / max(0.01f, min(leftH, rightH))
-            val isTilted = ratioW > 1.48f || ratioH > 1.48f
+            val isTilted = ratioW > 1.70f || ratioH > 1.70f
 
-            val confidence = (bestScore / 100.0).coerceIn(0.70, 0.99)
-            val elapsed = System.currentTimeMillis() - startTime
+            val confidence = (bestScore / 100.0).coerceIn(0.75, 0.99)
 
             return DetectionResult(
                 tl = normTL,
@@ -261,57 +418,113 @@ object DocumentDetectorOpenCV {
                 isTilted = isTilted,
                 isPartiallyVisible = isPartial,
                 isTooFar = isTooFar,
-                processingTimeMs = elapsed
+                processingTimeMs = 0L
             )
         } catch (e: Exception) {
-            Log.w(TAG, "OpenCV detection error:", e)
+            Log.e(TAG, "Detection processing error:", e)
             return null
         } finally {
-            rawMat?.release()
-            rotatedMat?.release()
-            resizedMat?.release()
-            blurredMat?.release()
-            edgesMat?.release()
-            closedMat?.release()
-            kernel?.release()
+            resized?.release()
+            blurred?.release()
+            k3?.release()
+            k5?.release()
+            k9?.release()
         }
     }
 
     /**
      * Orders 4 vertices consistently: Top-Left, Top-Right, Bottom-Right, Bottom-Left
+     * Uses clockwise polar angle sorting around the centroid, and sets Top-Left
+     * as the vertex with minimum (x + y). Invariant to rotation and perspective tilt.
      */
-    private fun orderCorners(pts: Array<Point>): Array<Point> {
-        val sortedByY = pts.sortedBy { it.y }
-        val topPts = sortedByY.take(2).sortedBy { it.x }
-        val botPts = sortedByY.takeLast(2).sortedBy { it.x }
+    fun orderCorners(pts: Array<Point>): Array<Point> {
+        if (pts.size != 4) return pts
 
-        val tl = topPts[0]
-        val tr = topPts[1]
-        val br = botPts[1]
-        val bl = botPts[0]
+        val cx = pts.map { it.x }.average()
+        val cy = pts.map { it.y }.average()
 
-        return arrayOf(tl, tr, br, bl)
+        // Sort points in clockwise order around centroid
+        val sorted = pts.sortedBy { p ->
+            atan2(p.y - cy, p.x - cx)
+        }
+
+        // Find the top-left corner (smallest sum x + y)
+        var minIdx = 0
+        var minSum = sorted[0].x + sorted[0].y
+        for (i in 1 until 4) {
+            val s = sorted[i].x + sorted[i].y
+            if (s < minSum) {
+                minSum = s
+                minIdx = i
+            }
+        }
+
+        // Reorder so [0]=TL, [1]=TR, [2]=BR, [3]=BL in clockwise order
+        return Array(4) { i -> sorted[(minIdx + i) % 4] }
     }
 
     /**
-     * 9-Factor Candidate Scoring Engine
+     * Multi-Factor Candidate Scoring Engine
      */
     private fun evaluateCandidate(
         pts: Array<Point>,
         targetW: Int,
         targetH: Int,
-        areaRatio: Double
+        areaRatio: Double,
+        smoothMat: Mat,
+        totalMeanLum: Double
     ): Double {
         var score = 0.0
 
-        // Factor 1: Area Coverage Score (Ideal: 20% to 75% of view)
-        score += when {
-            areaRatio in 0.20..0.75 -> 30.0
-            areaRatio in 0.12..0.85 -> 20.0
-            else -> 10.0
+        // Factor 1: Paper Interior Luminance & Contrast
+        var mask: Mat? = null
+        var dilatedMask: Mat? = null
+        var ringMask: Mat? = null
+        try {
+            mask = Mat.zeros(Size(targetW.toDouble(), targetH.toDouble()), CvType.CV_8UC1)
+            Imgproc.fillConvexPoly(mask, MatOfPoint(*pts), Scalar(255.0))
+
+            val meanMat = MatOfDouble()
+            val stdDevMat = MatOfDouble()
+            Core.meanStdDev(smoothMat, meanMat, stdDevMat, mask)
+            val insideMean = meanMat.toArray()[0]
+            val insideStdDev = stdDevMat.toArray()[0]
+
+            // A real document has high interior luminance (white paper)
+            val lumScore = (insideMean / 255.0) * 35.0
+            score += lumScore
+
+            // Standard deviation penalty: true paper has uniform background, whereas
+            // a contour that encompasses both white paper and black chair/desk has massive variance
+            if (insideStdDev > 52.0) {
+                score -= (insideStdDev - 52.0) * 0.8
+            }
+
+            // Contrast with immediate outer boundary (border step)
+            dilatedMask = Mat()
+            val kRing = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(9.0, 9.0))
+            Imgproc.dilate(mask, dilatedMask, kRing)
+            kRing.release()
+
+            ringMask = Mat()
+            Core.subtract(dilatedMask, mask, ringMask)
+            val outsideMean = Core.mean(smoothMat, ringMask).`val`[0]
+            val borderContrast = insideMean - outsideMean
+
+            if (borderContrast >= 18.0) {
+                score += min(25.0, borderContrast * 0.35)
+            } else if (borderContrast < 4.0) {
+                score -= 10.0
+            }
+        } catch (e: Exception) {
+            score += 15.0
+        } finally {
+            mask?.release()
+            dilatedMask?.release()
+            ringMask?.release()
         }
 
-        // Factor 2: Internal Angles (Ideal: each corner near 90 degrees)
+        // Factor 2: Corner Orthogonality (Angles near 90°)
         var anglePenalty = 0.0
         for (i in 0 until 4) {
             val pPrev = pts[(i + 3) % 4]
@@ -327,15 +540,15 @@ object DocumentDetectorOpenCV {
             val mag = sqrt((v1x * v1x + v1y * v1y) * (v2x * v2x + v2y * v2y)).coerceAtLeast(1e-4)
             val cosTheta = abs(dot / mag)
 
-            // cos(90) = 0. If cosTheta > 0.35, angle is outside 70..110 deg
-            if (cosTheta > 0.35) {
-                anglePenalty += (cosTheta - 0.35) * 40.0
+            // cos(90) = 0. Penalize only if cosTheta > 0.50
+            if (cosTheta > 0.50) {
+                anglePenalty += (cosTheta - 0.50) * 20.0
             }
         }
         val angleScore = max(0.0, 25.0 - anglePenalty)
         score += angleScore
 
-        // Factor 3: Perspective Symmetry (Opposite edges should have similar lengths)
+        // Factor 3: Perspective Symmetry
         val wTop = dist(pts[0], pts[1])
         val wBot = dist(pts[3], pts[2])
         val hLeft = dist(pts[0], pts[3])
@@ -344,23 +557,30 @@ object DocumentDetectorOpenCV {
         val ratioW = max(wTop, wBot) / max(1.0, min(wTop, wBot))
         val ratioH = max(hLeft, hRight) / max(1.0, min(hLeft, hRight))
 
-        if (ratioW <= 1.35 && ratioH <= 1.35) {
-            score += 25.0
-        } else if (ratioW <= 1.55 && ratioH <= 1.55) {
+        if (ratioW <= 1.40 && ratioH <= 1.40) {
+            score += 22.0
+        } else if (ratioW <= 1.65 && ratioH <= 1.65) {
             score += 15.0
         } else {
-            score += 5.0
+            score += 6.0
         }
 
-        // Factor 4: Aspect Ratio Plausibility (Standard Document Ratios: 1.15 to 2.2)
+        // Factor 4: Aspect Ratio Plausibility
         val avgW = (wTop + wBot) / 2.0
         val avgH = (hLeft + hRight) / 2.0
         val aspect = max(avgW, avgH) / max(1.0, min(avgW, avgH))
 
-        if (aspect in 1.20..1.75) {
+        if (aspect in 1.15..1.85) {
             score += 20.0
-        } else if (aspect in 1.10..2.30) {
-            score += 10.0
+        } else if (aspect in 1.05..2.40) {
+            score += 12.0
+        }
+
+        // Factor 5: Area Coverage Score (Ideal: 10% to 85% of view)
+        score += when {
+            areaRatio in 0.12..0.82 -> 18.0
+            areaRatio in 0.07..0.90 -> 12.0
+            else -> 6.0
         }
 
         return score
@@ -374,36 +594,61 @@ object DocumentDetectorOpenCV {
 
     /**
      * Hardware-accelerated OpenCV 4-Point Perspective Transform & Crop
+     * Restores accurate document geometry and removes all background (desks, laptops, cables).
      */
     fun warpPerspective(
         srcBitmap: Bitmap,
-        corners: Array<Point>
+        corners: Array<Point>,
+        paperPreset: String? = null
     ): Bitmap? {
-        if (!isOpenCVInitialized) return null
+        if (!isReady()) return null
         var srcMat: Mat? = null
         var dstMat: Mat? = null
         var transformMatrix: Mat? = null
+        var srcPtMat: MatOfPoint2f? = null
+        var dstPtMat: MatOfPoint2f? = null
 
         try {
             srcMat = Mat()
-            org.opencv.android.Utils.bitmapToMat(srcBitmap, srcMat)
+            Utils.bitmapToMat(srcBitmap, srcMat)
 
             val ordered = orderCorners(corners)
-            val wTop = dist(ordered[0], ordered[1])
-            val wBot = dist(ordered[3], ordered[2])
-            val hLeft = dist(ordered[0], ordered[3])
-            val hRight = dist(ordered[1], ordered[2])
+            val tl = ordered[0]
+            val tr = ordered[1]
+            val br = ordered[2]
+            val bl = ordered[3]
 
-            val dstWidth = max(wTop, wBot).toInt().coerceAtLeast(100)
-            val dstHeight = max(hLeft, hRight).toInt().coerceAtLeast(100)
+            // Calculate true Euclidean dimensions of the four-point quad
+            val widthTop = hypot(tr.x - tl.x, tr.y - tl.y)
+            val widthBot = hypot(br.x - bl.x, br.y - bl.y)
+            val heightLeft = hypot(bl.x - tl.x, bl.y - tl.y)
+            val heightRight = hypot(br.x - tr.x, br.y - tr.y)
 
-            val srcPtMat = MatOfPoint2f(
-                ordered[0],
-                ordered[1],
-                ordered[2],
-                ordered[3]
-            )
-            val dstPtMat = MatOfPoint2f(
+            var dstWidth = max(widthTop, widthBot).toInt().coerceAtLeast(200)
+            var dstHeight = max(heightLeft, heightRight).toInt().coerceAtLeast(200)
+
+            val isPortrait = dstHeight >= dstWidth
+
+            // Restore standard paper aspect ratio if preset specified
+            if (paperPreset != null && paperPreset.uppercase() != "CUSTOM") {
+                val targetRatio = when (paperPreset.uppercase()) {
+                    "A4", "A3", "A5" -> 1.4142
+                    "LETTER" -> 1.2941
+                    "ID" -> 1.5858
+                    "LEGAL" -> 1.6470
+                    else -> 0.0
+                }
+                if (targetRatio > 0.0) {
+                    if (isPortrait) {
+                        dstHeight = (dstWidth * targetRatio).toInt().coerceAtLeast(200)
+                    } else {
+                        dstWidth = (dstHeight * targetRatio).toInt().coerceAtLeast(200)
+                    }
+                }
+            }
+
+            srcPtMat = MatOfPoint2f(tl, tr, br, bl)
+            dstPtMat = MatOfPoint2f(
                 Point(0.0, 0.0),
                 Point(dstWidth.toDouble(), 0.0),
                 Point(dstWidth.toDouble(), dstHeight.toDouble()),
@@ -421,15 +666,14 @@ object DocumentDetectorOpenCV {
             )
 
             val outBitmap = Bitmap.createBitmap(dstWidth, dstHeight, Bitmap.Config.ARGB_8888)
-            org.opencv.android.Utils.matToBitmap(dstMat, outBitmap)
-
-            srcPtMat.release()
-            dstPtMat.release()
+            Utils.matToBitmap(dstMat, outBitmap)
             return outBitmap
         } catch (e: Exception) {
             Log.e(TAG, "Error in OpenCV warpPerspective", e)
             return null
         } finally {
+            srcPtMat?.release()
+            dstPtMat?.release()
             srcMat?.release()
             dstMat?.release()
             transformMatrix?.release()

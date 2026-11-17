@@ -5,6 +5,7 @@ export interface IDocumentCategory extends Document {
   slug: string;
   description?: string;
   icon?: string;
+  color?: string;
   isActive: boolean;
   isSystemDefault: boolean;
   createdAt: Date;
@@ -17,6 +18,7 @@ const DocumentCategorySchema = new Schema<IDocumentCategory>(
     slug: { type: String, required: true, lowercase: true, trim: true, unique: true },
     description: { type: String, trim: true },
     icon: { type: String, trim: true },
+    color: { type: String, trim: true },
     isActive: { type: Boolean, default: true, index: true },
     isSystemDefault: { type: Boolean, default: false },
   },

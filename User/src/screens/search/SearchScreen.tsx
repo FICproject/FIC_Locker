@@ -14,6 +14,7 @@ import { colors, typography, borderRadius, shadows } from '../../theme';
 import { DocumentItem } from '../../types';
 import { formatBytes, formatDate } from '../../utils/formatters';
 import { documentService } from '../../services/api/documentService';
+import { deduplicateDocuments } from '../../utils/documentUtils';
 
 type SearchFilterScope = 'all' | 'name' | 'ocr' | 'pdf' | 'images';
 
@@ -42,7 +43,7 @@ export const SearchScreen: React.FC<{ navigation: any; route: any }> = ({
     try {
       const cached = await AsyncStorage.getItem('@fic_locker_offline_docs');
       if (cached) {
-        localDocs = JSON.parse(cached);
+        localDocs = deduplicateDocuments(JSON.parse(cached));
       }
     } catch {}
 
@@ -50,15 +51,11 @@ export const SearchScreen: React.FC<{ navigation: any; route: any }> = ({
     try {
       const res = await documentService.getDocuments();
       if (res && Array.isArray(res.documents)) {
-        serverDocs = res.documents;
+        serverDocs = deduplicateDocuments(res.documents);
       }
     } catch {}
 
-    const map = new Map<string, DocumentItem>();
-    serverDocs.forEach((d) => map.set(d._id, d));
-    localDocs.forEach((d) => map.set(d._id, d));
-
-    const combined = Array.from(map.values());
+    const combined = deduplicateDocuments([...serverDocs, ...localDocs]);
     setAllDocs(combined);
     setLoading(false);
 

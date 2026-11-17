@@ -65,14 +65,28 @@ export const CornerAdjustmentModal: React.FC<CornerAdjustmentModalProps> = ({
   onCancel,
   onRetake,
 }) => {
-  const defaultCorners = (): DocumentCorners => ({
-    tl: { x: CANVAS_WIDTH * 0.08, y: CANVAS_HEIGHT * 0.08 },
-    tr: { x: CANVAS_WIDTH * 0.92, y: CANVAS_HEIGHT * 0.08 },
-    br: { x: CANVAS_WIDTH * 0.92, y: CANVAS_HEIGHT * 0.92 },
-    bl: { x: CANVAS_WIDTH * 0.08, y: CANVAS_HEIGHT * 0.92 },
+  const [canvasDims, setCanvasDims] = useState<{ width: number; height: number }>({
+    width: CANVAS_WIDTH,
+    height: Math.round(SCREEN_HEIGHT * 0.74),
+  });
+  const canvasDimsRef = useRef({
+    width: CANVAS_WIDTH,
+    height: Math.round(SCREEN_HEIGHT * 0.74),
+  });
+
+  const defaultCorners = (dims = canvasDimsRef.current): DocumentCorners => ({
+    tl: { x: dims.width * 0.08, y: dims.height * 0.08 },
+    tr: { x: dims.width * 0.92, y: dims.height * 0.08 },
+    br: { x: dims.width * 0.92, y: dims.height * 0.92 },
+    bl: { x: dims.width * 0.08, y: dims.height * 0.92 },
   });
 
   const [corners, setCorners] = useState<DocumentCorners>(defaultCorners());
+  const cornersRef = useRef<DocumentCorners>(corners);
+  useEffect(() => {
+    cornersRef.current = corners;
+  }, [corners]);
+
   const [activeHandle, setActiveHandle] = useState<string | null>(null);
   const [selectedPaper, setSelectedPaper] = useState<PaperSize>(initialAnalysis?.paperSize || 'A4');
   const [analysis, setAnalysis] = useState<DocumentAnalysisResult | null>(initialAnalysis || null);
@@ -86,45 +100,98 @@ export const CornerAdjustmentModal: React.FC<CornerAdjustmentModalProps> = ({
 
   useEffect(() => {
     if (visible && imageUri) {
-      if (initialCorners) {
-        setCorners({
-          tl: { x: initialCorners.tl.x * CANVAS_WIDTH, y: initialCorners.tl.y * CANVAS_HEIGHT },
-          tr: { x: initialCorners.tr.x * CANVAS_WIDTH, y: initialCorners.tr.y * CANVAS_HEIGHT },
-          br: { x: initialCorners.br.x * CANVAS_WIDTH, y: initialCorners.br.y * CANVAS_HEIGHT },
-          bl: { x: initialCorners.bl.x * CANVAS_WIDTH, y: initialCorners.bl.y * CANVAS_HEIGHT },
-        });
-      }
+      Image.getSize(
+        imageUri,
+        (imgW, imgH) => {
+          const maxW = SCREEN_WIDTH - 28;
+          const maxH = Math.round(SCREEN_HEIGHT * 0.74);
+          const aspect = imgW / imgH;
+          let cW = maxW;
+          let cH = cW / aspect;
+          if (cH > maxH) {
+            cH = maxH;
+            cW = cH * aspect;
+          }
+          const dims = { width: Math.round(cW), height: Math.round(cH) };
+          setCanvasDims(dims);
+          canvasDimsRef.current = dims;
+
+          // Check if initialCorners are valid and not hugging edge
+          const isAtEdge =
+            initialCorners &&
+            (initialCorners.tl.x <= 0.06 ||
+              initialCorners.tl.y <= 0.06 ||
+              initialCorners.tr.x >= 0.94 ||
+              initialCorners.br.y >= 0.94);
+
+          if (initialCorners && !isAtEdge) {
+            setCorners({
+              tl: { x: initialCorners.tl.x * dims.width, y: initialCorners.tl.y * dims.height },
+              tr: { x: initialCorners.tr.x * dims.width, y: initialCorners.tr.y * dims.height },
+              br: { x: initialCorners.br.x * dims.width, y: initialCorners.br.y * dims.height },
+              bl: { x: initialCorners.bl.x * dims.width, y: initialCorners.bl.y * dims.height },
+            });
+          } else {
+            runAutoAnalysis(dims);
+          }
+        },
+        () => {
+          const dims = { width: CANVAS_WIDTH, height: Math.round(SCREEN_HEIGHT * 0.74) };
+          setCanvasDims(dims);
+          canvasDimsRef.current = dims;
+          runAutoAnalysis(dims);
+        }
+      );
+
       if (initialAnalysis) {
         setAnalysis(initialAnalysis);
         setSelectedPaper(initialAnalysis.paperSize);
-        if (!initialCorners) {
-          applyBoundsToCorners(initialAnalysis.normalizedBounds);
-        }
-      } else if (!initialCorners) {
-        runAutoAnalysis();
       }
     }
   }, [visible, imageUri]);
 
-  const applyBoundsToCorners = (bounds: { left: number; top: number; right: number; bottom: number }) => {
+  const applyBoundsToCorners = (
+    bounds: { left: number; top: number; right: number; bottom: number },
+    dims = canvasDimsRef.current
+  ) => {
     setCorners({
-      tl: { x: bounds.left * CANVAS_WIDTH, y: bounds.top * CANVAS_HEIGHT },
-      tr: { x: bounds.right * CANVAS_WIDTH, y: bounds.top * CANVAS_HEIGHT },
-      br: { x: bounds.right * CANVAS_WIDTH, y: bounds.bottom * CANVAS_HEIGHT },
-      bl: { x: bounds.left * CANVAS_WIDTH, y: bounds.bottom * CANVAS_HEIGHT },
+      tl: { x: bounds.left * dims.width, y: bounds.top * dims.height },
+      tr: { x: bounds.right * dims.width, y: bounds.top * dims.height },
+      br: { x: bounds.right * dims.width, y: bounds.bottom * dims.height },
+      bl: { x: bounds.left * dims.width, y: bounds.bottom * dims.height },
     });
   };
 
-  const runAutoAnalysis = async () => {
+  const runAutoAnalysis = async (dims = canvasDimsRef.current) => {
     if (!imageUri) return;
     setIsAnalyzing(true);
     try {
-      const res = await documentAnalysisService.analyzeAndCrop(imageUri);
-      setAnalysis(res);
-      setSelectedPaper(res.paperSize);
-      applyBoundsToCorners(res.normalizedBounds);
+      const cornerResult = await documentAnalysisService.detectDocumentCorners(imageUri);
+      if (cornerResult.detected && cornerResult.corners) {
+        setCorners({
+          tl: { x: cornerResult.corners.tl.x * dims.width, y: cornerResult.corners.tl.y * dims.height },
+          tr: { x: cornerResult.corners.tr.x * dims.width, y: cornerResult.corners.tr.y * dims.height },
+          br: { x: cornerResult.corners.br.x * dims.width, y: cornerResult.corners.br.y * dims.height },
+          bl: { x: cornerResult.corners.bl.x * dims.width, y: cornerResult.corners.bl.y * dims.height },
+        });
+        if (cornerResult.paperSize) setSelectedPaper(cornerResult.paperSize);
+      } else {
+        const res = await documentAnalysisService.analyzeAndCrop(imageUri);
+        setAnalysis(res);
+        setSelectedPaper(res.paperSize);
+        if (res.detectedCorners) {
+          setCorners({
+            tl: { x: res.detectedCorners.tl.x * dims.width, y: res.detectedCorners.tl.y * dims.height },
+            tr: { x: res.detectedCorners.tr.x * dims.width, y: res.detectedCorners.tr.y * dims.height },
+            br: { x: res.detectedCorners.br.x * dims.width, y: res.detectedCorners.br.y * dims.height },
+            bl: { x: res.detectedCorners.bl.x * dims.width, y: res.detectedCorners.bl.y * dims.height },
+          });
+        } else {
+          applyBoundsToCorners(res.normalizedBounds, dims);
+        }
+      }
     } catch (e) {
-      setCorners(defaultCorners());
+      setCorners(defaultCorners(dims));
     } finally {
       setIsAnalyzing(false);
     }
@@ -136,16 +203,17 @@ export const CornerAdjustmentModal: React.FC<CornerAdjustmentModalProps> = ({
 
     const spec = PAPER_SPECS[preset];
     const targetRatio = spec.ratio; // height / width
+    const dims = canvasDimsRef.current;
 
-    let boxW = CANVAS_WIDTH * 0.86;
+    let boxW = dims.width * 0.86;
     let boxH = boxW * targetRatio;
-    if (boxH > CANVAS_HEIGHT * 0.92) {
-      boxH = CANVAS_HEIGHT * 0.92;
+    if (boxH > dims.height * 0.92) {
+      boxH = dims.height * 0.92;
       boxW = boxH / targetRatio;
     }
 
-    const left = (CANVAS_WIDTH - boxW) / 2;
-    const top = (CANVAS_HEIGHT - boxH) / 2;
+    const left = (dims.width - boxW) / 2;
+    const top = (dims.height - boxH) / 2;
     const right = left + boxW;
     const bottom = top + boxH;
 
@@ -168,10 +236,10 @@ export const CornerAdjustmentModal: React.FC<CornerAdjustmentModalProps> = ({
       onPanResponderGrant: () => {
         setActiveHandle(key);
         dragStartRef.current = {
-          tl: { ...corners.tl },
-          tr: { ...corners.tr },
-          br: { ...corners.br },
-          bl: { ...corners.bl },
+          tl: { ...cornersRef.current.tl },
+          tr: { ...cornersRef.current.tr },
+          br: { ...cornersRef.current.br },
+          bl: { ...cornersRef.current.bl },
         };
       },
       onPanResponderMove: (_, gestureState) => {
@@ -179,13 +247,17 @@ export const CornerAdjustmentModal: React.FC<CornerAdjustmentModalProps> = ({
         if (!start) return;
 
         const startPt = start[key];
-        const newX = Math.max(0, Math.min(CANVAS_WIDTH, startPt.x + gestureState.dx));
-        const newY = Math.max(0, Math.min(CANVAS_HEIGHT, startPt.y + gestureState.dy));
+        const newX = Math.max(0, Math.min(canvasDimsRef.current.width, startPt.x + gestureState.dx));
+        const newY = Math.max(0, Math.min(canvasDimsRef.current.height, startPt.y + gestureState.dy));
 
-        setCorners((prev) => ({
-          ...prev,
-          [key]: { x: newX, y: newY },
-        }));
+        setCorners((prev) => {
+          const next = {
+            ...prev,
+            [key]: { x: newX, y: newY },
+          };
+          cornersRef.current = next;
+          return next;
+        });
       },
       onPanResponderRelease: () => {
         setActiveHandle(null);
@@ -205,10 +277,10 @@ export const CornerAdjustmentModal: React.FC<CornerAdjustmentModalProps> = ({
       onPanResponderGrant: () => {
         setActiveHandle(edge);
         dragStartRef.current = {
-          tl: { ...corners.tl },
-          tr: { ...corners.tr },
-          br: { ...corners.br },
-          bl: { ...corners.bl },
+          tl: { ...cornersRef.current.tl },
+          tr: { ...cornersRef.current.tr },
+          br: { ...cornersRef.current.br },
+          bl: { ...cornersRef.current.bl },
         };
       },
       onPanResponderMove: (_, gestureState) => {
@@ -219,38 +291,54 @@ export const CornerAdjustmentModal: React.FC<CornerAdjustmentModalProps> = ({
           const dy = gestureState.dy;
           const newY_tl = Math.max(0, Math.min(start.bl.y - 20, start.tl.y + dy));
           const newY_tr = Math.max(0, Math.min(start.br.y - 20, start.tr.y + dy));
-          setCorners((prev) => ({
-            ...prev,
-            tl: { ...prev.tl, y: newY_tl },
-            tr: { ...prev.tr, y: newY_tr },
-          }));
+          setCorners((prev) => {
+            const next = {
+              ...prev,
+              tl: { ...prev.tl, y: newY_tl },
+              tr: { ...prev.tr, y: newY_tr },
+            };
+            cornersRef.current = next;
+            return next;
+          });
         } else if (edge === 'bottom') {
           const dy = gestureState.dy;
-          const newY_bl = Math.min(CANVAS_HEIGHT, Math.max(start.tl.y + 20, start.bl.y + dy));
-          const newY_br = Math.min(CANVAS_HEIGHT, Math.max(start.tr.y + 20, start.br.y + dy));
-          setCorners((prev) => ({
-            ...prev,
-            bl: { ...prev.bl, y: newY_bl },
-            br: { ...prev.br, y: newY_br },
-          }));
+          const newY_bl = Math.min(canvasDimsRef.current.height, Math.max(start.tl.y + 20, start.bl.y + dy));
+          const newY_br = Math.min(canvasDimsRef.current.height, Math.max(start.tr.y + 20, start.br.y + dy));
+          setCorners((prev) => {
+            const next = {
+              ...prev,
+              bl: { ...prev.bl, y: newY_bl },
+              br: { ...prev.br, y: newY_br },
+            };
+            cornersRef.current = next;
+            return next;
+          });
         } else if (edge === 'left') {
           const dx = gestureState.dx;
           const newX_tl = Math.max(0, Math.min(start.tr.x - 20, start.tl.x + dx));
           const newX_bl = Math.max(0, Math.min(start.br.x - 20, start.bl.x + dx));
-          setCorners((prev) => ({
-            ...prev,
-            tl: { ...prev.tl, x: newX_tl },
-            bl: { ...prev.bl, x: newX_bl },
-          }));
+          setCorners((prev) => {
+            const next = {
+              ...prev,
+              tl: { ...prev.tl, x: newX_tl },
+              bl: { ...prev.bl, x: newX_bl },
+            };
+            cornersRef.current = next;
+            return next;
+          });
         } else if (edge === 'right') {
           const dx = gestureState.dx;
-          const newX_tr = Math.min(CANVAS_WIDTH, Math.max(start.tl.x + 20, start.tr.x + dx));
-          const newX_br = Math.min(CANVAS_WIDTH, Math.max(start.bl.x + 20, start.br.x + dx));
-          setCorners((prev) => ({
-            ...prev,
-            tr: { ...prev.tr, x: newX_tr },
-            br: { ...prev.br, x: newX_br },
-          }));
+          const newX_tr = Math.min(canvasDimsRef.current.width, Math.max(start.tl.x + 20, start.tr.x + dx));
+          const newX_br = Math.min(canvasDimsRef.current.width, Math.max(start.bl.x + 20, start.br.x + dx));
+          setCorners((prev) => {
+            const next = {
+              ...prev,
+              tr: { ...prev.tr, x: newX_tr },
+              br: { ...prev.br, x: newX_br },
+            };
+            cornersRef.current = next;
+            return next;
+          });
         }
       },
       onPanResponderRelease: () => {
@@ -297,11 +385,13 @@ export const CornerAdjustmentModal: React.FC<CornerAdjustmentModalProps> = ({
   const handleContinue = async () => {
     setIsAnalyzing(true);
     try {
+      const cw = canvasDimsRef.current.width;
+      const ch = canvasDimsRef.current.height;
       const normCorners: DocumentCorners = {
-        tl: { x: corners.tl.x / CANVAS_WIDTH, y: corners.tl.y / CANVAS_HEIGHT },
-        tr: { x: corners.tr.x / CANVAS_WIDTH, y: corners.tr.y / CANVAS_HEIGHT },
-        br: { x: corners.br.x / CANVAS_WIDTH, y: corners.br.y / CANVAS_HEIGHT },
-        bl: { x: corners.bl.x / CANVAS_WIDTH, y: corners.bl.y / CANVAS_HEIGHT },
+        tl: { x: Math.max(0, Math.min(1, corners.tl.x / cw)), y: Math.max(0, Math.min(1, corners.tl.y / ch)) },
+        tr: { x: Math.max(0, Math.min(1, corners.tr.x / cw)), y: Math.max(0, Math.min(1, corners.tr.y / ch)) },
+        br: { x: Math.max(0, Math.min(1, corners.br.x / cw)), y: Math.max(0, Math.min(1, corners.br.y / ch)) },
+        bl: { x: Math.max(0, Math.min(1, corners.bl.x / cw)), y: Math.max(0, Math.min(1, corners.bl.y / ch)) },
       };
       const result = await documentAnalysisService.analyzeAndCrop(imageUri, normCorners, selectedPaper);
       onApply(normCorners, selectedPaper, result.croppedUri, currentFilter, docName);
@@ -326,20 +416,20 @@ export const CornerAdjustmentModal: React.FC<CornerAdjustmentModalProps> = ({
         <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
         {/* Viewport Canvas with Bounding Guides & Pill Handles (Doc Scanner Image 4) */}
-        <View style={styles.canvasContainer}>
+        <View style={[styles.canvasContainer, { width: canvasDims.width, height: canvasDims.height }]}>
           {imageUri ? (
             <Image
               source={{ uri: imageUri }}
               style={[
                 styles.documentImage,
-                { transform: [{ rotate: `${rotationDeg}deg` }] },
+                { width: canvasDims.width, height: canvasDims.height, transform: [{ rotate: `${rotationDeg}deg` }] },
               ]}
-              resizeMode="contain"
+              resizeMode="cover"
             />
           ) : null}
 
           {/* SVG Crop Polygon & Edge Guides (Doc Scanner Cyan Theme) */}
-          <Svg style={StyleSheet.absoluteFillObject} width={CANVAS_WIDTH} height={CANVAS_HEIGHT}>
+          <Svg style={StyleSheet.absoluteFillObject} width={canvasDims.width} height={canvasDims.height}>
             <Polygon
               points={polygonPoints}
               fill="rgba(0, 229, 255, 0.14)"
@@ -355,7 +445,8 @@ export const CornerAdjustmentModal: React.FC<CornerAdjustmentModalProps> = ({
 
           {/* 4 Corner Rings (Doc Scanner Style: Cyan Ring with Center White Dot) */}
           <View
-            style={[styles.cornerRingContainer, { left: corners.tl.x - 24, top: corners.tl.y - 24 }]}
+            style={[styles.cornerRingContainer, { left: corners.tl.x - 28, top: corners.tl.y - 28 }]}
+            hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
             {...tlPan.panHandlers}
           >
             <View style={[styles.cornerRing, activeHandle === 'tl' && styles.cornerRingActive]}>
@@ -364,7 +455,8 @@ export const CornerAdjustmentModal: React.FC<CornerAdjustmentModalProps> = ({
           </View>
 
           <View
-            style={[styles.cornerRingContainer, { left: corners.tr.x - 24, top: corners.tr.y - 24 }]}
+            style={[styles.cornerRingContainer, { left: corners.tr.x - 28, top: corners.tr.y - 28 }]}
+            hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
             {...trPan.panHandlers}
           >
             <View style={[styles.cornerRing, activeHandle === 'tr' && styles.cornerRingActive]}>
@@ -373,7 +465,8 @@ export const CornerAdjustmentModal: React.FC<CornerAdjustmentModalProps> = ({
           </View>
 
           <View
-            style={[styles.cornerRingContainer, { left: corners.br.x - 24, top: corners.br.y - 24 }]}
+            style={[styles.cornerRingContainer, { left: corners.br.x - 28, top: corners.br.y - 28 }]}
+            hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
             {...brPan.panHandlers}
           >
             <View style={[styles.cornerRing, activeHandle === 'br' && styles.cornerRingActive]}>
@@ -382,7 +475,8 @@ export const CornerAdjustmentModal: React.FC<CornerAdjustmentModalProps> = ({
           </View>
 
           <View
-            style={[styles.cornerRingContainer, { left: corners.bl.x - 24, top: corners.bl.y - 24 }]}
+            style={[styles.cornerRingContainer, { left: corners.bl.x - 28, top: corners.bl.y - 28 }]}
+            hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
             {...blPan.panHandlers}
           >
             <View style={[styles.cornerRing, activeHandle === 'bl' && styles.cornerRingActive]}>
@@ -394,6 +488,7 @@ export const CornerAdjustmentModal: React.FC<CornerAdjustmentModalProps> = ({
           {/* Top Pill Handle */}
           <View
             style={[styles.edgePillHContainer, { left: midTop.x - 28, top: midTop.y - 20 }]}
+            hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
             {...topEdgePan.panHandlers}
           >
             <View style={[styles.edgePillH, activeHandle === 'top' && styles.edgePillActive]} />
@@ -402,6 +497,7 @@ export const CornerAdjustmentModal: React.FC<CornerAdjustmentModalProps> = ({
           {/* Bottom Pill Handle */}
           <View
             style={[styles.edgePillHContainer, { left: midBottom.x - 28, top: midBottom.y - 20 }]}
+            hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
             {...bottomEdgePan.panHandlers}
           >
             <View style={[styles.edgePillH, activeHandle === 'bottom' && styles.edgePillActive]} />
@@ -410,6 +506,7 @@ export const CornerAdjustmentModal: React.FC<CornerAdjustmentModalProps> = ({
           {/* Left Pill Handle */}
           <View
             style={[styles.edgePillVContainer, { left: midLeft.x - 20, top: midLeft.y - 28 }]}
+            hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
             {...leftEdgePan.panHandlers}
           >
             <View style={[styles.edgePillV, activeHandle === 'left' && styles.edgePillActive]} />
@@ -418,109 +515,14 @@ export const CornerAdjustmentModal: React.FC<CornerAdjustmentModalProps> = ({
           {/* Right Pill Handle */}
           <View
             style={[styles.edgePillVContainer, { left: midRight.x - 20, top: midRight.y - 28 }]}
+            hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
             {...rightEdgePan.panHandlers}
           >
             <View style={[styles.edgePillV, activeHandle === 'right' && styles.edgePillActive]} />
           </View>
         </View>
 
-        {/* Guidance Text (Doc Scanner Image 4: ℹ️ Drag the points to adjust the borders.) */}
-        <View style={styles.guidancePill}>
-          <Text style={styles.guidanceIcon}>ℹ️</Text>
-          <Text style={styles.guidanceText}>Drag the points to adjust the borders.</Text>
-        </View>
-
-        {/* Filter Dropdown Selector (Doc Scanner Image 4: CURRENT FILTER : [ VIVID LIGHT ▾ ]) */}
-        <View style={styles.filterRow}>
-          <Text style={styles.filterPromptLabel}>CURRENT FILTER :</Text>
-          <TouchableOpacity
-            style={styles.filterDropdownBtn}
-            onPress={() => setShowFilterPicker(!showFilterPicker)}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.filterDropdownText}>{currentFilter}</Text>
-            <Text style={styles.filterDropdownArrow}>▾</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Filter Picker Dropdown List */}
-        {showFilterPicker && (
-          <View style={styles.filterPickerDropdown}>
-            {filterOptions.map((f) => (
-              <TouchableOpacity
-                key={f}
-                style={[styles.filterOptionItem, currentFilter === f && styles.filterOptionItemActive]}
-                onPress={() => {
-                  setCurrentFilter(f);
-                  setShowFilterPicker(false);
-                }}
-              >
-                <Text style={[styles.filterOptionText, currentFilter === f && styles.filterOptionTextActive]}>
-                  {f} {currentFilter === f ? '✓' : ''}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        {/* Action Tools Row (Doc Scanner Image 4: Rotate | Crop free | Doc Name) */}
-        <View style={styles.toolsRow}>
-          <TouchableOpacity style={styles.actionToolBtn} onPress={handleRotate} activeOpacity={0.7}>
-            <Text style={styles.actionToolIcon}>🔄</Text>
-            <Text style={styles.actionToolLabel}>Rotate</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.actionToolBtn}
-            onPress={() => setShowPresetPicker(!showPresetPicker)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.actionToolIcon}>⛶</Text>
-            <Text style={styles.actionToolLabel}>
-              {selectedPaper === 'Custom' ? 'Crop free' : selectedPaper}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.actionToolBtn} onPress={handleEditDocName} activeOpacity={0.7}>
-            <Text style={styles.actionToolIcon}>✏️</Text>
-            <Text style={styles.actionToolLabel}>Doc Name</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Paper Size Preset Dropdown */}
-        {showPresetPicker && (
-          <View style={styles.presetPickerContainer}>
-            {(['A4', 'A3', 'A5', 'Letter', 'ID', 'Custom'] as PaperSize[]).map((p) => (
-              <TouchableOpacity
-                key={p}
-                style={[styles.presetChip, selectedPaper === p && styles.presetChipActive]}
-                onPress={() => {
-                  applyPaperPreset(p);
-                  setShowPresetPicker(false);
-                }}
-              >
-                <Text style={[styles.presetChipText, selectedPaper === p && styles.presetChipTextActive]}>
-                  {p === 'Custom' ? 'Free Crop' : p}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        {/* Checkbox Setting (Doc Scanner Image 4: Show crop screen after every capture.) */}
-        <TouchableOpacity
-          style={styles.settingToggleRow}
-          onPress={() => setShowCropScreenAlways(!showCropScreenAlways)}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.settingGearIcon}>⚙️</Text>
-          <Text style={styles.settingToggleText}>Show crop screen after every capture.</Text>
-          <View style={[styles.settingCheckbox, showCropScreenAlways && styles.settingCheckboxChecked]}>
-            {showCropScreenAlways && <Text style={styles.settingCheckmark}>✓</Text>}
-          </View>
-        </TouchableOpacity>
-
-        {/* Bottom Action Buttons (Doc Scanner Image 4: [ RETAKE ] and [ CONTINUE ]) */}
+        {/* Bottom Action Buttons: [ RETAKE ] and [ CONTINUE ] */}
         <View style={styles.bottomButtonsRow}>
           <TouchableOpacity
             style={styles.retakeBtn}
@@ -564,8 +566,9 @@ const styles = StyleSheet.create({
   },
   cornerRingContainer: {
     position: 'absolute',
-    width: 48,
-    height: 48,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 20,

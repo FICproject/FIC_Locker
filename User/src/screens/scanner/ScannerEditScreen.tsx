@@ -11,6 +11,8 @@ import {
   Dimensions,
   Platform,
   TextInput,
+  ActivityIndicator,
+  Modal,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,6 +23,11 @@ import { CornerAdjustmentModal, DocumentCorners } from '../../components/scanner
 import { pdfService, PdfPageItem, PdfExportOptions } from '../../services/pdfService';
 import { shareService } from '../../services/shareService';
 import { documentService } from '../../services/api/documentService';
+import { useAuth } from '../../context/AuthContext';
+import { CategoryItem } from '../../types';
+import { categoryService, getCategoryEmoji } from '../../services/api/categoryService';
+import { DEFAULT_CATEGORIES } from '../../constants';
+import { deduplicateDocuments } from '../../utils/documentUtils';
 import {
   PaperSize,
   PAPER_SPECS,
@@ -37,6 +44,7 @@ export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
   route,
 }) => {
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const pageUri = route.params?.pageUri;
   const initialPagesFromRoute: PdfPageItem[] = (route.params?.allPages && route.params.allPages.length > 0)
     ? route.params.allPages.map((p: any, idx: number) => ({
@@ -135,10 +143,57 @@ export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
   const [ocrModalVisible, setOcrModalVisible] = useState<boolean>(false);
   const [pdfToolsVisible, setPdfToolsVisible] = useState<boolean>(false);
   const [cornerModalVisible, setCornerModalVisible] = useState<boolean>(false);
+  const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [extractedOcrText, setExtractedOcrText] = useState<string>('');
   const [docTitle, setDocTitle] = useState<string>(
     'DocScanner_' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '_' + Date.now().toString().slice(-4)
   );
+
+  // Category selection for saving
+  const [chosenCategory, setChosenCategory] = useState<string>('Personal Documents');
+  const [saveModalVisible, setSaveModalVisible] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [categoriesList, setCategoriesList] = useState<CategoryItem[]>(() =>
+    DEFAULT_CATEGORIES.map((c) => ({
+      id: c.id,
+      name: c.name,
+      icon: c.icon,
+      color: c.color,
+    }))
+  );
+
+  useEffect(() => {
+    categoryService.getCachedCategories().then((cached) => {
+      if (cached && cached.length > 0) setCategoriesList(cached);
+    });
+    categoryService.fetchCategories().then((cats) => {
+      if (cats && cats.length > 0) setCategoriesList(cats);
+    });
+  }, []);
+
+  // Auto-Crop / Remove Background for current page
+  const handleAutoCropCurrentPage = async () => {
+    const currentUri = pages[currentPageIndex]?.uri || pageUri;
+    if (!currentUri) return;
+    setIsProcessing(true);
+    try {
+      const res = await documentAnalysisService.analyzeAndCrop(currentUri, null, currentPaperSize);
+      if (res.croppedUri) {
+        setPages((prev) => {
+          const updated = [...prev];
+          updated[currentPageIndex] = {
+            ...updated[currentPageIndex],
+            uri: res.croppedUri,
+          };
+          return updated;
+        });
+      }
+    } catch {
+      setCornerModalVisible(true);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   // Doc Scanner Image 6: Open PDF
   const handleOpenPdf = async () => {
@@ -194,24 +249,55 @@ export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
     }
   };
 
-  // Doc Scanner Image 6: Save to My Documents
-  const handleSaveToMyDocs = async () => {
+  // Doc Scanner: Open Category & Save Modal
+  const handleSaveToMyDocs = () => {
+    setSaveModalVisible(true);
+  };
+
+  // Perform actual document save with chosen category
+  const executeSaveDocument = async (targetCategory: string) => {
+    setIsSaving(true);
     try {
       const result = await pdfService.createPdfFromPages(pages, {
         title: docTitle,
         pageSize: currentPaperSize,
       });
 
+      let serverDocId: string | null = null;
+      let serverStorageKey = result.fileUri || 'offline_pdf';
+
+      // Immediate attempt to upload to backend server with target category
+      try {
+        const authRes = await documentService.requestUploadAuth({
+          fileName: `${docTitle}.pdf`,
+          fileSizeBytes: result.fileSizeBytes || 1572864,
+          mimeType: 'application/pdf',
+          category: targetCategory,
+          tags: ['scanned', currentPaperSize.toLowerCase(), 'doc_scanner'],
+        });
+        if (authRes?.documentId) {
+          serverDocId = authRes.documentId;
+          serverStorageKey = authRes.storageKey || serverStorageKey;
+          try {
+            await documentService.confirmUpload(authRes.documentId, {
+              storageKey: serverStorageKey,
+            });
+          } catch {}
+        }
+      } catch (uploadErr) {
+        console.warn('[ScannerEditScreen] Direct upload fallback to offline queue:', uploadErr);
+      }
+
       const newOfflineDoc = {
-        _id: `doc_scan_${Date.now()}`,
-        userId: 'usr_default',
+        _id: serverDocId || `doc_scan_${Date.now()}`,
+        userId: user?._id || '',
         name: `${docTitle}.pdf`,
         originalFileName: `${docTitle}.pdf`,
         fileType: 'pdf',
         mimeType: 'application/pdf',
         fileSizeBytes: result.fileSizeBytes,
-        storageKey: result.fileUri || 'offline_pdf',
-        category: 'Personal Documents',
+        storageKey: serverStorageKey,
+        category: targetCategory,
         tags: ['scanned', currentPaperSize.toLowerCase(), 'doc_scanner'],
         status: 'available',
         localUri: result.fileUri || pages[0]?.uri,
@@ -221,23 +307,35 @@ export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
 
       const existingRaw = await AsyncStorage.getItem('@fic_locker_offline_docs');
       const existingDocs = existingRaw ? JSON.parse(existingRaw) : [];
-      existingDocs.unshift(newOfflineDoc);
-      await AsyncStorage.setItem('@fic_locker_offline_docs', JSON.stringify(existingDocs));
+      const cleanDocs = deduplicateDocuments([newOfflineDoc, ...existingDocs]);
+      await AsyncStorage.setItem('@fic_locker_offline_docs', JSON.stringify(cleanDocs));
 
-      try {
-        await documentService.syncOfflineDocuments();
-      } catch (err) {}
+      if (!serverDocId) {
+        try {
+          await documentService.syncOfflineDocuments();
+        } catch (err) {}
+      }
+
+      setSaveModalVisible(false);
 
       Alert.alert(
         'Document Saved',
-        `"${docTitle}.pdf" (${pages.length} page${pages.length > 1 ? 's' : ''}) has been saved to My Documents.`,
+        `"${docTitle}.pdf" (${pages.length} page${pages.length > 1 ? 's' : ''}) has been saved under "${targetCategory}".`,
         [
           {
-            text: '📁 View in My Docs',
+            text: '📁 View in Category',
             onPress: () => {
-              navigation.reset({
-                index: 0,
-                routes: [{ name: 'MainTabs' }],
+              navigation.navigate('CategoryDetail', {
+                category: targetCategory,
+              });
+            },
+          },
+          {
+            text: 'My Docs',
+            onPress: () => {
+              navigation.navigate('MainTabs', {
+                screen: 'DocumentsTab',
+                params: { category: targetCategory },
               });
             },
           },
@@ -246,6 +344,8 @@ export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
       );
     } catch (e: any) {
       Alert.alert('Save Error', e.message || 'Failed to save document.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -368,24 +468,9 @@ export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
 
   const isSideways = rotationDeg === 90 || rotationDeg === 270;
 
-  // Dynamic Crop Padding & Margins based on preset
+  // Clean viewport: zero artificial margins so only the document image is shown
   const getCropStyle = () => {
-    switch (cropPreset) {
-      case 'a4':
-        return { paddingHorizontal: 16, paddingVertical: 24, borderRadius: 12 };
-      case 'a3':
-        return { paddingHorizontal: 12, paddingVertical: 32, borderRadius: 10 };
-      case 'a5':
-        return { paddingHorizontal: 22, paddingVertical: 18, borderRadius: 12 };
-      case 'letter':
-        return { paddingHorizontal: 18, paddingVertical: 22, borderRadius: 12 };
-      case 'idcard':
-        return { paddingHorizontal: 28, paddingVertical: 48, borderRadius: 16 };
-      case 'square':
-        return { paddingHorizontal: 32, paddingVertical: 32, borderRadius: 12 };
-      default:
-        return { padding: 0 };
-    }
+    return { padding: 0 };
   };
 
   // Dynamic Brightness Overlay opacity
@@ -451,27 +536,8 @@ export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
         </TouchableOpacity>
         <View style={styles.headerTitleContainer}>
           <Text style={styles.title}>Edit Document</Text>
-          {pages.length > 1 && (
-            <View style={styles.pageCountBadge}>
-              <Text style={styles.pageCountBadgeText}>
-                Page {currentPageIndex + 1} of {pages.length}
-              </Text>
-            </View>
-          )}
-          {(pages[currentPageIndex]?.rotationDeg || 0) !== 0 && (
-            <View style={styles.rotationBadge}>
-              <Text style={styles.rotationBadgeText}>{pages[currentPageIndex].rotationDeg}°</Text>
-            </View>
-          )}
         </View>
         <View style={styles.headerRightActions}>
-          <TouchableOpacity
-            onPress={handleRotateCurrentPage}
-            style={styles.headerRotateBtn}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.headerRotateIcon}>🔄</Text>
-          </TouchableOpacity>
           <TouchableOpacity onPress={handleDone} style={styles.iconBtn}>
             <Text style={[styles.iconBtnText, { color: colors.primary }]}>✓</Text>
           </TouchableOpacity>
@@ -584,65 +650,79 @@ export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
           </ScrollView>
         )}
 
-        {/* Floating Pagination Strip for multi-page documents */}
-        {pages.length > 1 && (
+        {/* Floating Pagination Strip for documents: Page X/Y */}
+        {pages.length > 0 && (
           <View style={styles.paginationStrip}>
-            <TouchableOpacity
-              style={[
-                styles.arrowBtn,
-                currentPageIndex === 0 && styles.arrowBtnDisabled,
-              ]}
-              onPress={() => goToPage(currentPageIndex - 1)}
-              disabled={currentPageIndex === 0}
-              activeOpacity={0.7}
-            >
-              <Text
+            {pages.length > 1 && (
+              <TouchableOpacity
                 style={[
-                  styles.arrowBtnText,
-                  currentPageIndex === 0 && styles.arrowBtnTextDisabled,
+                  styles.arrowBtn,
+                  currentPageIndex === 0 && styles.arrowBtnDisabled,
                 ]}
+                onPress={() => goToPage(currentPageIndex - 1)}
+                disabled={currentPageIndex === 0}
+                activeOpacity={0.7}
               >
-                ‹
-              </Text>
-            </TouchableOpacity>
+                <Text
+                  style={[
+                    styles.arrowBtnText,
+                    currentPageIndex === 0 && styles.arrowBtnTextDisabled,
+                  ]}
+                >
+                  ‹
+                </Text>
+              </TouchableOpacity>
+            )}
 
             <View style={styles.paginationCenter}>
               <Text style={styles.paginationPageText}>
-                Page {currentPageIndex + 1} of {pages.length}
+                Page {currentPageIndex + 1}/{pages.length}
               </Text>
-              <View style={styles.dotsRow}>
-                {pages.map((_, idx) => (
-                  <TouchableOpacity
-                    key={idx}
-                    onPress={() => goToPage(idx)}
-                    hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
-                    style={[
-                      styles.dot,
-                      idx === currentPageIndex ? styles.dotActive : styles.dotInactive,
-                    ]}
-                  />
-                ))}
-              </View>
+              {pages.length > 1 && (
+                <View style={styles.dotsRow}>
+                  {pages.map((_, idx) => (
+                    <TouchableOpacity
+                      key={idx}
+                      onPress={() => goToPage(idx)}
+                      hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                      style={[
+                        styles.dot,
+                        idx === currentPageIndex ? styles.dotActive : styles.dotInactive,
+                      ]}
+                    />
+                  ))}
+                </View>
+              )}
             </View>
 
-            <TouchableOpacity
-              style={[
-                styles.arrowBtn,
-                currentPageIndex === pages.length - 1 && styles.arrowBtnDisabled,
-              ]}
-              onPress={() => goToPage(currentPageIndex + 1)}
-              disabled={currentPageIndex === pages.length - 1}
-              activeOpacity={0.7}
-            >
-              <Text
+            {pages.length > 1 && (
+              <TouchableOpacity
                 style={[
-                  styles.arrowBtnText,
-                  currentPageIndex === pages.length - 1 && styles.arrowBtnTextDisabled,
+                  styles.arrowBtn,
+                  currentPageIndex === pages.length - 1 && styles.arrowBtnDisabled,
                 ]}
+                onPress={() => goToPage(currentPageIndex + 1)}
+                disabled={currentPageIndex === pages.length - 1}
+                activeOpacity={0.7}
               >
-                ›
-              </Text>
-            </TouchableOpacity>
+                <Text
+                  style={[
+                    styles.arrowBtnText,
+                    currentPageIndex === pages.length - 1 && styles.arrowBtnTextDisabled,
+                  ]}
+                >
+                  ›
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {isProcessing && (
+          <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+            <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', alignItems: 'center', justifyContent: 'center' }}>
+              <ActivityIndicator size="large" color={colors.primary} />
+            </View>
           </View>
         )}
       </View>
@@ -812,8 +892,8 @@ export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
           onPress={() => setCornerModalVisible(true)}
           activeOpacity={0.7}
         >
-          <Text style={styles.dsBarIcon}>✏️</Text>
-          <Text style={styles.dsBarLabel}>Edit</Text>
+          <Text style={styles.dsBarIcon}>✂️</Text>
+          <Text style={styles.dsBarLabel}>Crop</Text>
         </TouchableOpacity>
 
         {/* 3. Edit All (Filters / Enhancements for all pages) */}
@@ -894,6 +974,95 @@ export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
           onCancel={() => setCornerModalVisible(false)}
         />
       ) : null}
+
+      {/* Save Document & Category Selection Modal */}
+      <Modal
+        visible={saveModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSaveModalVisible(false)}
+      >
+        <View style={styles.saveModalOverlay}>
+          <View style={styles.saveModalCard}>
+            <View style={styles.saveModalHeader}>
+              <Text style={styles.saveModalTitle}>💾 Save Scanned Document</Text>
+              <TouchableOpacity
+                onPress={() => setSaveModalVisible(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Text style={styles.saveModalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.saveInputLabel}>Document Title</Text>
+            <TextInput
+              style={styles.saveTextInput}
+              value={docTitle}
+              onChangeText={setDocTitle}
+              placeholder="Enter document name..."
+              placeholderTextColor="#9CA3AF"
+            />
+
+            <Text style={styles.saveInputLabel}>Select Category</Text>
+            <ScrollView
+              style={styles.categoryPickerList}
+              showsVerticalScrollIndicator={false}
+              nestedScrollEnabled
+            >
+              {categoriesList.map((cat) => {
+                const isSelected =
+                  chosenCategory.trim().toLowerCase() === cat.name.trim().toLowerCase();
+                const emoji = getCategoryEmoji(cat.name, cat.icon);
+                return (
+                  <TouchableOpacity
+                    key={cat.id || cat._id || cat.name}
+                    style={[
+                      styles.categoryOptionItem,
+                      isSelected && styles.categoryOptionItemSelected,
+                    ]}
+                    onPress={() => setChosenCategory(cat.name)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.catOptionLeft}>
+                      <Text style={styles.catOptionEmoji}>{emoji}</Text>
+                      <Text
+                        style={[
+                          styles.catOptionText,
+                          isSelected && styles.catOptionTextSelected,
+                        ]}
+                      >
+                        {cat.name}
+                      </Text>
+                    </View>
+                    {isSelected && <Text style={styles.catCheckmark}>✓</Text>}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            <View style={styles.saveModalFooter}>
+              <TouchableOpacity
+                style={styles.saveCancelBtn}
+                onPress={() => setSaveModalVisible(false)}
+                disabled={isSaving}
+              >
+                <Text style={styles.saveCancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.saveConfirmBtn}
+                onPress={() => executeSaveDocument(chosenCategory)}
+                disabled={isSaving}
+              >
+                {isSaving ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.saveConfirmBtnText}>Save to My Docs</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -1040,7 +1209,7 @@ const styles = StyleSheet.create({
   canvasContainer: {
     flex: 1,
     position: 'relative',
-    backgroundColor: '#F8F9FE',
+    backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1055,8 +1224,8 @@ const styles = StyleSheet.create({
     height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 4,
+    paddingVertical: 4,
   },
   paginationStrip: {
     position: 'absolute',
@@ -1128,14 +1297,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
-    backgroundColor: '#E5E7EB',
-    borderRadius: borderRadius.md,
+    backgroundColor: 'transparent',
     overflow: 'hidden',
   },
   imageContainer: {
     width: '100%',
     height: '100%',
-    borderRadius: borderRadius.md,
+    backgroundColor: 'transparent',
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1462,5 +1630,131 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: '#4B5563',
+  },
+  saveModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  saveModalCard: {
+    width: '100%',
+    maxHeight: '80%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: borderRadius.xl,
+    padding: 22,
+    ...shadows.card,
+  },
+  saveModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  saveModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  saveModalCloseText: {
+    fontSize: 18,
+    color: colors.textMuted,
+    padding: 4,
+  },
+  saveInputLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    marginBottom: 6,
+    marginTop: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  saveTextInput: {
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: borderRadius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: colors.text,
+  },
+  categoryPickerList: {
+    maxHeight: 220,
+    marginTop: 4,
+  },
+  categoryOptionItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderRadius: borderRadius.md,
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    marginBottom: 8,
+  },
+  categoryOptionItemSelected: {
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primary,
+    borderWidth: 1.5,
+  },
+  catOptionLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  catOptionEmoji: {
+    fontSize: 20,
+  },
+  catOptionText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  catOptionTextSelected: {
+    color: colors.primary,
+    fontWeight: '700',
+  },
+  catCheckmark: {
+    fontSize: 16,
+    color: colors.primary,
+    fontWeight: '800',
+  },
+  saveModalFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 18,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+    paddingTop: 14,
+  },
+  saveCancelBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  saveCancelBtnText: {
+    fontSize: 14,
+    color: colors.textMuted,
+    fontWeight: '600',
+  },
+  saveConfirmBtn: {
+    backgroundColor: colors.primary,
+    paddingVertical: 11,
+    paddingHorizontal: 20,
+    borderRadius: borderRadius.md,
+    minWidth: 140,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saveConfirmBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

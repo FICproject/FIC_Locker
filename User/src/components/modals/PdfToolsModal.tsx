@@ -36,6 +36,7 @@ export const PdfToolsModal: React.FC<PdfToolsModalProps> = ({
   onClose,
 }) => {
   const [pages, setPages] = useState<PdfPageItem[]>(initialPages);
+  const [fileName, setFileName] = useState<string>(documentTitle ? documentTitle.replace(/\.[^/.]+$/, '') : 'Document');
   const [compression, setCompression] = useState<'low' | 'medium' | 'high'>('medium');
   const [passwordProtect, setPasswordProtect] = useState<boolean>(false);
   const [password, setPassword] = useState<string>('');
@@ -47,12 +48,15 @@ export const PdfToolsModal: React.FC<PdfToolsModalProps> = ({
   const [watermarkModalVisible, setWatermarkModalVisible] = useState<boolean>(false);
   const [activePageIndexForSig, setActivePageIndexForSig] = useState<number>(0);
 
-  // Sync initialPages when modal opens
+  // Sync initialPages & documentTitle when modal opens
   React.useEffect(() => {
     if (initialPages?.length) {
       setPages(initialPages);
     }
-  }, [initialPages]);
+    if (documentTitle) {
+      setFileName(documentTitle.replace(/\.[^/.]+$/, ''));
+    }
+  }, [initialPages, documentTitle]);
 
   // Page Actions
   const handleRotatePage = (index: number) => {
@@ -123,7 +127,7 @@ export const PdfToolsModal: React.FC<PdfToolsModalProps> = ({
       password: passwordProtect ? password.trim() : undefined,
       watermark,
       signatures,
-      title: documentTitle,
+      title: fileName.trim() || documentTitle,
     };
 
     onExport(format, options, pages);
@@ -231,6 +235,22 @@ export const PdfToolsModal: React.FC<PdfToolsModalProps> = ({
                 <Text style={styles.addPageText}>Add Page</Text>
               </TouchableOpacity>
             </ScrollView>
+
+            {/* File Name / Rename for Export */}
+            <Text style={styles.sectionTitle}>File Name & Title</Text>
+            <View style={styles.fileNameBox}>
+              <TextInput
+                style={styles.fileNameInput}
+                value={fileName}
+                onChangeText={setFileName}
+                placeholder="Enter document title / file name"
+                placeholderTextColor={colors.textMuted}
+                autoCapitalize="none"
+              />
+              <View style={styles.fileExtBadge}>
+                <Text style={styles.fileExtBadgeText}>.pdf</Text>
+              </View>
+            </View>
 
             {/* 2. PDF Compression Settings */}
             <Text style={styles.sectionTitle}>PDF Compression</Text>
@@ -497,6 +517,34 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.textSecondary,
     fontWeight: '600',
+  },
+  fileNameBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: borderRadius.md,
+    paddingHorizontal: 12,
+    marginBottom: 4,
+  },
+  fileNameInput: {
+    flex: 1,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: colors.text,
+    fontWeight: '600',
+  },
+  fileExtBadge: {
+    backgroundColor: '#EEF2F6',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  fileExtBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textSecondary,
   },
   compressionRow: {
     flexDirection: 'row',

@@ -2,6 +2,7 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { apiClient } from './client';
 import { API_CONFIG, resolveDevHost, setApiHostOverride, DEV_CANDIDATE_HOSTS } from '../../constants';
+import { deduplicateDocuments } from '../../utils/documentUtils';
 import {
   DocumentItem,
   UploadAuthorisationResponse,
@@ -90,26 +91,38 @@ export const documentService = {
     try {
       const cached = await AsyncStorage.getItem('@fic_locker_offline_docs');
       if (!cached) return 0;
-      const list: DocumentItem[] = JSON.parse(cached);
+      const list: DocumentItem[] = deduplicateDocuments(JSON.parse(cached));
       let syncedCount = 0;
       const updatedList: DocumentItem[] = [];
 
       for (const doc of list) {
-        if (doc._id && doc._id.startsWith('doc_local_')) {
+        // Any document without a 24-char MongoDB ObjectId needs to be synced to backend
+        const isOffline = !doc._id || doc._id.startsWith('doc_') || !/^[0-9a-fA-F]{24}$/.test(doc._id);
+        if (isOffline) {
           try {
+            const isPdf =
+              doc.fileType === 'pdf' ||
+              doc.mimeType?.includes('pdf') ||
+              doc.name?.toLowerCase().endsWith('.pdf');
             const authRes = await this.requestUploadAuth({
-              fileName: doc.name || doc.originalFileName || 'Scanned_Doc.jpg',
+              fileName: doc.name || doc.originalFileName || (isPdf ? 'Scanned_Doc.pdf' : 'Scanned_Doc.jpg'),
               fileSizeBytes: doc.fileSizeBytes || 1572864,
-              mimeType: doc.mimeType || 'image/jpeg',
+              mimeType: doc.mimeType || (isPdf ? 'application/pdf' : 'image/jpeg'),
               category: doc.category || 'Personal Documents',
-              tags: doc.tags || [],
+              tags: doc.tags || ['scanned'],
               notes: doc.notes || undefined,
             });
             if (authRes?.documentId) {
+              try {
+                await this.confirmUpload(authRes.documentId, {
+                  storageKey: authRes.storageKey,
+                });
+              } catch {}
               syncedCount++;
               updatedList.push({
                 ...doc,
                 _id: authRes.documentId,
+                storageKey: authRes.storageKey,
                 status: 'available',
               });
               continue;
@@ -121,9 +134,8 @@ export const documentService = {
         updatedList.push(doc);
       }
 
-      if (syncedCount > 0) {
-        await AsyncStorage.setItem('@fic_locker_offline_docs', JSON.stringify(updatedList));
-      }
+      const cleanUpdatedList = deduplicateDocuments(updatedList);
+      await AsyncStorage.setItem('@fic_locker_offline_docs', JSON.stringify(cleanUpdatedList));
       return syncedCount;
     } catch {
       return 0;
@@ -302,6 +314,34 @@ export const subscriptionService = {
     } catch {
       return null;
     }
+  },
+
+  async createOrder(
+    planId: string,
+    billingCycle: 'monthly' | 'annual'
+  ): Promise<{
+    success: boolean;
+    orderId: string;
+    amount: number;
+    amountInr: number;
+    currency: string;
+    keyId: string;
+    plan: { _id: string; name: string; code: string; description?: string };
+    user: { name: string; email: string; phone?: string };
+  }> {
+    const res = await apiClient.post('/subscriptions/create-order', { planId, billingCycle });
+    return res.data as any;
+  },
+
+  async verifyPayment(payload: {
+    orderId: string;
+    paymentId: string;
+    signature?: string;
+    planId: string;
+    billingCycle: 'monthly' | 'annual';
+  }): Promise<{ success: boolean; message: string; subscription: any }> {
+    const res = await apiClient.post('/subscriptions/verify-payment', payload);
+    return res.data as any;
   },
 
   async upgradePlan(planId: string, billingCycle: 'monthly' | 'annual'): Promise<{ success: boolean; redirectUrl?: string }> {

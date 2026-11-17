@@ -41,50 +41,50 @@ const DETECTION_STATE_CONFIG: Record<
   looking: {
     text: 'Looking for document...',
     color: '#CFD8DC',
-    strokeColor: '#00E5FF',
-    fillColor: 'rgba(0, 229, 255, 0.10)',
+    strokeColor: '#00E676',
+    fillColor: 'rgba(0, 230, 118, 0.10)',
     dotColor: '#78909C',
   },
   detected: {
     text: 'Document detected',
-    color: '#00E5FF',
-    strokeColor: '#00E5FF',
-    fillColor: 'rgba(0, 229, 255, 0.12)',
-    dotColor: '#00E5FF',
+    color: '#00E676',
+    strokeColor: '#00E676',
+    fillColor: 'rgba(0, 230, 118, 0.14)',
+    dotColor: '#00E676',
   },
   partial: {
     text: 'Move document into frame',
-    color: '#FFA726',
-    strokeColor: '#FFA726',
-    fillColor: 'rgba(255, 167, 38, 0.12)',
-    dotColor: '#FFA726',
+    color: '#00E676',
+    strokeColor: '#00E676',
+    fillColor: 'rgba(0, 230, 118, 0.14)',
+    dotColor: '#00E676',
   },
   too_far: {
     text: 'Move closer',
-    color: '#FFA726',
-    strokeColor: '#00E5FF',
-    fillColor: 'rgba(0, 229, 255, 0.12)',
-    dotColor: '#FFA726',
+    color: '#00E676',
+    strokeColor: '#00E676',
+    fillColor: 'rgba(0, 230, 118, 0.14)',
+    dotColor: '#00E676',
   },
   tilted: {
     text: 'Align your document',
-    color: '#FFA726',
-    strokeColor: '#FFA726',
-    fillColor: 'rgba(255, 167, 38, 0.12)',
-    dotColor: '#FFA726',
+    color: '#00E676',
+    strokeColor: '#00E676',
+    fillColor: 'rgba(0, 230, 118, 0.14)',
+    dotColor: '#00E676',
   },
   stable: {
     text: 'Hold still...',
-    color: '#69F0AE',
-    strokeColor: '#00E5FF',
-    fillColor: 'rgba(0, 229, 255, 0.14)',
-    dotColor: '#69F0AE',
+    color: '#00E676',
+    strokeColor: '#00E676',
+    fillColor: 'rgba(0, 230, 118, 0.18)',
+    dotColor: '#00E676',
   },
   ready: {
     text: 'Document ready',
     color: '#00E676',
-    strokeColor: '#00E676', // VIBRANT GREEN!
-    fillColor: 'rgba(0, 230, 118, 0.18)',
+    strokeColor: '#00E676',
+    fillColor: 'rgba(0, 230, 118, 0.22)',
     dotColor: '#00E676',
   },
 };
@@ -143,6 +143,7 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
   const isCapturingRef = useRef<boolean>(false);
   const autoCaptureCooldownRef = useRef<number>(0);
   const activeCornersRef = useRef<DocumentCorners | null>(null);
+  const activeSensorCornersRef = useRef<DocumentCorners | null>(null);
 
   // Multi-page batch state (Doc Scanner Image 5)
   const [batchPages, setBatchPages] = useState<ScannedPageItem[]>([]);
@@ -175,7 +176,11 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
   };
 
   const processCapturedUri = useCallback(
-    async (photoUri: string, corners?: DocumentCorners | null) => {
+    async (
+      photoUri: string,
+      corners?: DocumentCorners | null,
+      isFromAuto: boolean = false
+    ) => {
       setIsLoading(true);
       setAnalyzingStatus('Analyzing Document...');
       try {
@@ -185,12 +190,9 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
 
         const effectiveUri = analysis.croppedUri || photoUri;
 
-        if (showCropScreenAfterCapture) {
-          // Open Crop / Corner Adjustment Screen (Doc Scanner Image 4)
-          setPendingImageUri(photoUri);
-          setCornerModalVisible(true);
-        } else {
-          // Directly add page to tray (Doc Scanner Image 5)
+        if (isFromAuto) {
+          // AUTO mode: Direct auto-crop to detected edges, bypass adjustment modal!
+          // Add directly to batch tray and stay on camera for next page
           const newPage: ScannedPageItem = {
             id: `page_${Date.now()}_${batchPages.length + 1}`,
             uri: effectiveUri,
@@ -201,13 +203,20 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
             confidence: analysis.confidence,
           };
           setBatchPages((prev) => [...prev, newPage]);
+          setCornerModalVisible(false);
+          setPendingImageUri(null);
+          setPendingAnalysis(null);
+          steadyFrameCountRef.current = 0;
+          setIsSteady(false);
+          autoCaptureCooldownRef.current = Date.now() + 2500;
+        } else {
+          // MANUAL mode: Open corner adjustment modal so user can drag and adjust
+          setPendingImageUri(photoUri);
+          setCornerModalVisible(true);
         }
       } catch (e: any) {
         console.warn('processCapturedUri analysis fallback:', e);
-        if (showCropScreenAfterCapture) {
-          setPendingImageUri(photoUri);
-          setCornerModalVisible(true);
-        } else {
+        if (isFromAuto) {
           const newPage: ScannedPageItem = {
             id: `page_${Date.now()}_${batchPages.length + 1}`,
             uri: photoUri,
@@ -217,17 +226,25 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
             paperDimensions: '210 × 297 mm',
           };
           setBatchPages((prev) => [...prev, newPage]);
+          setCornerModalVisible(false);
+          steadyFrameCountRef.current = 0;
+          setIsSteady(false);
+          autoCaptureCooldownRef.current = Date.now() + 2500;
+        } else {
+          setPendingImageUri(photoUri);
+          setCornerModalVisible(true);
         }
       } finally {
         setIsLoading(false);
         setAnalyzingStatus('');
+        isCapturingRef.current = false;
       }
     },
-    [batchPages.length, showCropScreenAfterCapture]
+    [batchPages.length]
   );
 
   const handleCapture = useCallback(
-    async (cornersToUse?: DocumentCorners | null) => {
+    async (sensorCornersToUse?: DocumentCorners | null, isFromAuto: boolean = false) => {
       if (isLoading) return;
       setIsLoading(true);
       isCapturingRef.current = true;
@@ -236,8 +253,13 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
         if (cameraRef.current) {
           const photo = await cameraRef.current.capture();
           if (photo?.uri) {
-            const effectiveCorners = cornersToUse || photo.detectedCorners || activeCornersRef.current || null;
-            await processCapturedUri(photo.uri, effectiveCorners);
+            // Priority: direct sensor corners from capture, or passed sensor corners, or active sensor corners
+            const effectiveCorners =
+              photo.detectedCorners ||
+              sensorCornersToUse ||
+              activeSensorCornersRef.current ||
+              null;
+            await processCapturedUri(photo.uri, effectiveCorners, isFromAuto);
             return;
           }
         }
@@ -256,7 +278,7 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
     [isLoading, processCapturedUri]
   );
 
-  // Document Detection Stream Handler (7 Real-Time Detection States)
+  // Document Detection Stream Handler (Real-Time Dynamic Edge Detection)
   const handleDocumentDetected = useCallback(
     (event: any) => {
       if (!event.detected || !event.corners) {
@@ -266,6 +288,7 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
         setDetectionState('looking');
         steadyFrameCountRef.current = 0;
         activeCornersRef.current = null;
+        activeSensorCornersRef.current = null;
         return;
       }
 
@@ -273,17 +296,30 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
       const currentCorners: DocumentCorners = { tl, tr, br, bl };
       setDetectedCorners(currentCorners);
       activeCornersRef.current = currentCorners;
+
+      // Extract sensor-space corners (for image cropping)
+      if (event.sensorCorners) {
+        activeSensorCornersRef.current = {
+          tl: event.sensorCorners.tl,
+          tr: event.sensorCorners.tr,
+          br: event.sensorCorners.br,
+          bl: event.sensorCorners.bl,
+        };
+      } else {
+        activeSensorCornersRef.current = currentCorners;
+      }
+
       setDetectedPaperInfo({
         size: event.paperSize || 'A4',
         confidence: event.confidence || 0.95,
       });
 
-      // State 3: Document partially visible – "Move document into frame"
+      // Margin clearance check (< 1% from viewfinder boundary)
       const isAtMargin =
-        tl.x < 0.035 || tl.y < 0.035 ||
-        tr.x > 0.965 || tr.y < 0.035 ||
-        br.x > 0.965 || br.y > 0.965 ||
-        bl.x < 0.035 || bl.y > 0.965;
+        tl.x < 0.01 || tl.y < 0.01 ||
+        tr.x > 0.99 || tr.y < 0.01 ||
+        br.x > 0.99 || br.y > 0.99 ||
+        bl.x < 0.01 || bl.y > 0.99;
 
       if (isAtMargin) {
         setDetectionState('partial');
@@ -306,8 +342,8 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
         areaPercent: Math.round(quadArea * 100),
       });
 
-      // State 4: Document too far – "Move closer"
-      if (quadArea < 0.14) {
+      // Document too far (< 8% of frame)
+      if (quadArea < 0.08) {
         setDetectionState('too_far');
         setIsSteady(false);
         steadyFrameCountRef.current = 0;
@@ -315,7 +351,7 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
         return;
       }
 
-      // State 5: Document tilted – "Align your document"
+      // Tilt check
       const dist = (p1: { x: number; y: number }, p2: { x: number; y: number }) =>
         Math.hypot(p1.x - p2.x, p1.y - p2.y);
 
@@ -327,7 +363,7 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
       const ratioW = Math.max(topW, botW) / Math.max(0.01, Math.min(topW, botW));
       const ratioH = Math.max(leftH, rightH) / Math.max(0.01, Math.min(leftH, rightH));
 
-      if (ratioW > 1.48 || ratioH > 1.48) {
+      if (ratioW > 1.85 || ratioH > 1.85) {
         setDetectionState('tilted');
         setIsSteady(false);
         steadyFrameCountRef.current = 0;
@@ -335,7 +371,7 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
         return;
       }
 
-      // States 2, 6, 7: Position Tracking & Consecutive Frame Stability
+      // Tracking & Consecutive Frame Stability
       const last = lastCornersRef.current;
       let delta = 1.0;
       if (last) {
@@ -350,36 +386,35 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
           Math.abs(bl.y - last.bl.y);
       }
 
-      if (delta > 0.065) {
+      if (delta > 0.085) {
         // Document moving within viewfinder
         steadyFrameCountRef.current = 0;
         setIsSteady(false);
-        setDetectionState('detected'); // State 2: Document detected
+        setDetectionState('detected');
       } else {
         // Document stable across consecutive frames
         steadyFrameCountRef.current += 1;
         const count = steadyFrameCountRef.current;
 
-        if (count < 4) {
+        if (count < 2) {
           setDetectionState('detected');
           setIsSteady(false);
-        } else if (count < 7) {
-          // State 6: Hold still...
+        } else if (count < 4) {
           setDetectionState('stable');
           setIsSteady(true);
         } else {
-          // State 7: Ready to capture – Outline turns VIBRANT GREEN!
+          // Document ready to capture - Green border locked!
           setDetectionState('ready');
           setIsSteady(true);
 
           // Intelligent Auto-Capture
           if (autoCapture && !isCapturingRef.current) {
             const now = Date.now();
-            if (now >= autoCaptureCooldownRef.current && count >= 9) {
-              autoCaptureCooldownRef.current = now + 3500;
+            if (now >= autoCaptureCooldownRef.current) {
+              autoCaptureCooldownRef.current = now + 3000;
               steadyFrameCountRef.current = 0;
               setIsSteady(false);
-              handleCapture(currentCorners);
+              handleCapture(activeSensorCornersRef.current, true /* isFromAuto */);
             }
           }
         }
@@ -413,7 +448,7 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
 
       const firstAsset = result.assets?.[0];
       if (firstAsset?.uri) {
-        await processCapturedUri(firstAsset.uri);
+        await processCapturedUri(firstAsset.uri, null, false /* manual adjustment */);
       }
     } catch (error: any) {
       Alert.alert('Error', error.message || 'An error occurred while opening gallery.');
@@ -446,6 +481,11 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
       setBatchPages((prev) => [...prev, newPage]);
       setPendingImageUri(null);
       setPendingAnalysis(null);
+      steadyFrameCountRef.current = 0;
+      setIsSteady(false);
+      autoCaptureCooldownRef.current = Date.now() + 2500;
+      isCapturingRef.current = false;
+      setIsLoading(false);
     }
   };
 
@@ -487,42 +527,6 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
             <Text style={styles.topActionIcon}>
               {flashMode === 'auto' ? '⚡A' : flashMode === 'on' ? '⚡' : '⚡✕'}
             </Text>
-          </TouchableOpacity>
-
-          {/* 3x3 Grid Toggle */}
-          <TouchableOpacity
-            onPress={() => setGridEnabled(!gridEnabled)}
-            style={[styles.topActionBtn, gridEnabled && styles.topActionActive]}
-          >
-            <Text style={[styles.topActionIcon, gridEnabled && { color: '#00A3FF' }]}>#</Text>
-          </TouchableOpacity>
-
-          {/* Aspect Ratio / Full Preset */}
-          <TouchableOpacity
-            onPress={() => {
-              Alert.alert('Scan Format', `Target Mode: ${selectedMode}\nStandard: ${lastDetectedPaper}`);
-            }}
-            style={styles.topActionBtn}
-          >
-            <Text style={styles.topActionIcon}>⛶</Text>
-          </TouchableOpacity>
-
-          {/* Settings Gear (Long-press toggles Developer Diagnostics HUD) */}
-          <TouchableOpacity
-            onPress={() => setShowSettingsModal(true)}
-            onLongPress={() => {
-              setDevDebugMode((prev) => {
-                const next = !prev;
-                Alert.alert(
-                  'Developer Diagnostics',
-                  next ? 'Native OpenCV diagnostics HUD enabled' : 'Diagnostics HUD disabled'
-                );
-                return next;
-              });
-            }}
-            style={styles.topActionBtn}
-          >
-            <Text style={styles.topActionIcon}>⚙️</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -713,7 +717,7 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
         {/* Center: Big Blue Circular Shutter Button with Camera Icon (Doc Scanner Images 1, 2, 3, 5) */}
         <TouchableOpacity
           style={styles.shutterOuterCircle}
-          onPress={() => handleCapture()}
+          onPress={() => handleCapture(activeSensorCornersRef.current, false /* manual */)}
           activeOpacity={0.85}
           disabled={isLoading}
         >
@@ -755,7 +759,7 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
           visible={cornerModalVisible}
           imageUri={pendingImageUri}
           initialAnalysis={pendingAnalysis}
-          initialCorners={detectedCorners}
+          initialCorners={pendingAnalysis?.detectedCorners || activeSensorCornersRef.current || detectedCorners}
           onApply={handleApplyCorners}
           onCancel={() => {
             setCornerModalVisible(false);

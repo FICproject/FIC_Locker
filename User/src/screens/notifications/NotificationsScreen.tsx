@@ -1,31 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
 import { colors, typography, borderRadius, shadows } from '../../theme';
 
 export const NotificationsScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
-  const notifications = [
-    {
-      id: '1',
-      title: 'Document Saved',
-      body: 'Resume.pdf has been encrypted and backed up to cloud.',
-      time: '10m ago',
-      unread: true,
-    },
-    {
-      id: '2',
-      title: 'Upcoming Expiry',
-      body: 'ID Card.jpg will expire in 155 days.',
-      time: '2h ago',
-      unread: false,
-    },
-    {
-      id: '3',
-      title: 'Storage Alert',
-      body: 'You have used 24% of your starter storage quota.',
-      time: '1d ago',
-      unread: false,
-    },
-  ];
+  const [notifications] = useState<any[]>([]);
 
   return (
     <View style={styles.container}>
@@ -37,20 +15,30 @@ export const NotificationsScreen: React.FC<{ navigation: any }> = ({ navigation 
         <View style={{ width: 20 }} />
       </View>
 
-      <FlatList
-        data={notifications}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.list}
-        renderItem={({ item }) => (
-          <View style={[styles.card, item.unread && styles.unreadCard]}>
-            <View style={styles.cardHeader}>
-              <Text style={styles.cardTitle}>{item.title}</Text>
-              <Text style={styles.time}>{item.time}</Text>
+      {notifications.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyIcon}>🔔</Text>
+          <Text style={styles.emptyTitle}>No Notifications</Text>
+          <Text style={styles.emptySubtitle}>
+            You're all caught up! Document updates and expiry alerts will appear here.
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={notifications}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.list}
+          renderItem={({ item }) => (
+            <View style={[styles.card, item.unread && styles.unreadCard]}>
+              <View style={styles.cardHeader}>
+                <Text style={styles.cardTitle}>{item.title}</Text>
+                <Text style={styles.time}>{item.time}</Text>
+              </View>
+              <Text style={styles.body}>{item.body}</Text>
             </View>
-            <Text style={styles.body}>{item.body}</Text>
-          </View>
-        )}
-      />
+          )}
+        />
+      )}
     </View>
   );
 };
@@ -109,6 +97,29 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textSecondary,
     lineHeight: 18,
+  },
+  emptyContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 40,
+    marginTop: 80,
+  },
+  emptyIcon: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 8,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });
 

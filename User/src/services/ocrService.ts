@@ -51,8 +51,8 @@ export const ocrService = {
     if (name.includes('resume') || name.includes('cv') || cat.includes('personal')) {
       blocks.push(
         { id: '1', text: 'CURRICULUM VITAE & PROFESSIONAL SUMMARY', confidence: 0.98, type: 'title' },
-        { id: '2', text: 'Name: Dhanu Sri M\nTitle: Software Systems Engineer\nEmail: dhanu.sri@gmail.com', confidence: 0.96, type: 'key_value' },
-        { id: '3', text: 'SKILLS & EXPERTISE:\n• Mobile & Cloud Architecture\n• React Native, TypeScript, Node.js\n• Secure Document Management & Cryptography', confidence: 0.94, type: 'paragraph' },
+        { id: '2', text: 'Professional Profile & Career Background', confidence: 0.96, type: 'key_value' },
+        { id: '3', text: 'SKILLS & EXPERTISE:\n• Document Management & Cloud Storage\n• Mobile Application Development\n• Secure File Encryption & Data Privacy', confidence: 0.94, type: 'paragraph' },
         { id: '4', text: `Verification Date: ${dateStr}\nStatus: Verified Original Document`, confidence: 0.95, type: 'date' }
       );
     } else if (name.includes('id') || name.includes('card') || name.includes('passport') || cat.includes('identity')) {
@@ -60,7 +60,7 @@ export const ocrService = {
       blocks.push(
         { id: '1', text: 'OFFICIAL IDENTITY DOCUMENT / CARD', confidence: 0.99, type: 'title' },
         { id: '2', text: `Document Number: ${idNum}`, confidence: 0.97, type: 'id_number' },
-        { id: '3', text: 'Holder: Dhanu Sri M\nNationality: Indian\nDOB: 15/08/1998', confidence: 0.95, type: 'key_value' },
+        { id: '3', text: `Verification Status: Valid & Active\nScanned Date: ${dateStr}`, confidence: 0.95, type: 'key_value' },
         { id: '4', text: `Issuing Authority: Government Authority\nValid Through: 31/12/2032`, confidence: 0.96, type: 'date' }
       );
     } else if (name.includes('bill') || name.includes('invoice') || name.includes('receipt') || cat.includes('financial')) {
@@ -68,13 +68,13 @@ export const ocrService = {
       blocks.push(
         { id: '1', text: `TAX INVOICE & PAYMENT RECEIPT - ${invNum}`, confidence: 0.98, type: 'title' },
         { id: '2', text: `Invoice Date: ${dateStr}\nPayment Status: PAID`, confidence: 0.95, type: 'date' },
-        { id: '3', text: '1. Cloud Storage Enterprise Plan (1 Year) — ₹4,999.00\n2. Advanced Security & Priority Support — ₹1,499.00', confidence: 0.94, type: 'paragraph' },
-        { id: '4', text: 'Total Amount Paid: ₹6,498.00 (Incl. 18% GST)', confidence: 0.97, type: 'amount' }
+        { id: '3', text: '1. Cloud Storage Plan\n2. Advanced Security & Priority Support', confidence: 0.94, type: 'paragraph' },
+        { id: '4', text: 'Total Amount: Paid in full', confidence: 0.97, type: 'amount' }
       );
     } else if (name.includes('certificate') || name.includes('degree') || cat.includes('education')) {
       blocks.push(
         { id: '1', text: 'CERTIFICATE OF ACADEMIC ACHIEVEMENT', confidence: 0.98, type: 'title' },
-        { id: '2', text: 'This is to certify that Dhanu Sri M has successfully completed the degree with First Class Distinction.', confidence: 0.96, type: 'paragraph' },
+        { id: '2', text: 'This is to certify that the recipient has successfully completed the program with First Class Distinction.', confidence: 0.96, type: 'paragraph' },
         { id: '3', text: `Conferred on: ${dateStr}\nInstitution: University of Technology & Sciences`, confidence: 0.94, type: 'key_value' },
         { id: '4', text: 'Accreditation Code: EDU-8849-AC', confidence: 0.93, type: 'id_number' }
       );

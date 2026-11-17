@@ -121,10 +121,10 @@ export const ProfileScreen: React.FC<{ navigation: any }> = ({ navigation }) => 
       {/* Profile Card */}
       <View style={styles.profileCard}>
         <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{user?.name?.charAt(0) || 'D'}</Text>
+          <Text style={styles.avatarText}>{user?.name?.charAt(0) || 'U'}</Text>
         </View>
-        <Text style={styles.userName}>{user?.name || 'Dhanu Sri M'}</Text>
-        <Text style={styles.userEmail}>{user?.email || 'dhanu.sri@gmail.com'}</Text>
+        <Text style={styles.userName}>{user?.name || 'My Account'}</Text>
+        <Text style={styles.userEmail}>{user?.email || ''}</Text>
       </View>
 
       {/* Section 1: Security & Protection */}

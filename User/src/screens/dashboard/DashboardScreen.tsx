@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,13 +10,17 @@ import {
   StatusBar,
   Platform,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
 import { colors, typography, borderRadius, shadows } from '../../theme';
 import { useAuth } from '../../context/AuthContext';
 import { documentService, storageService } from '../../services/api/documentService';
 import { DocumentItem, StorageInfo } from '../../types';
-import { formatBytes } from '../../utils/formatters';
-import { BellIcon, SearchIcon, ScanIcon, UploadIcon } from '../../assets/icons';
+import { formatBytes, formatDate } from '../../utils/formatters';
+import { deduplicateDocuments } from '../../utils/documentUtils';
+import { BellIcon, SearchIcon } from '../../assets/icons';
 import { DocScannerFab } from '../../components/common/DocScannerFab';
+import { DocScanCard } from '../../components/common/DocScanCard';
 
 interface DashboardScreenProps {
   navigation: any;
@@ -26,11 +30,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
   const { user } = useAuth();
   const [storage, setStorage] = useState<StorageInfo>({
     planName: 'Basic Free',
-    quotaBytes: 1073741824, // 1 GB
-    usedBytes: 256901120, // 245 MB
-    availableBytes: 816840704,
-    usedPercentage: 24,
-    documentCount: 24,
+    quotaBytes: 524288000,
+    usedBytes: 0,
+    availableBytes: 524288000,
+    usedPercentage: 0,
+    documentCount: 0,
     failedUploadCount: 0,
   });
 
@@ -38,71 +42,60 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
   const [refreshing, setRefreshing] = useState(false);
 
   const loadDashboardData = async () => {
-    try {
-      const storageRes = await storageService.getStorageInfo();
-      setStorage(storageRes);
-    } catch (e) {
-      // Graceful fallback to default/cached data matching the user mockup
-    }
+    let allDocs: DocumentItem[] = [];
 
+    // 1. Fetch offline cached documents
+    let localDocs: DocumentItem[] = [];
+    try {
+      const cached = await AsyncStorage.getItem('@fic_locker_offline_docs');
+      if (cached) {
+        localDocs = deduplicateDocuments(JSON.parse(cached));
+      }
+    } catch {}
+
+    // 2. Fetch backend documents
+    let serverDocs: DocumentItem[] = [];
     try {
       const docsRes = await documentService.getDocuments({ sortBy: 'createdAt', sortOrder: 'desc' });
       if (docsRes.documents?.length) {
-        setRecentDocs(docsRes.documents.slice(0, 5));
-      } else {
-        // Mock sample recent documents matching provided UI mockup
-        setRecentDocs([
-          {
-            _id: '1',
-            userId: user?._id || '1',
-            name: 'Resume.pdf',
-            originalFileName: 'Resume.pdf',
-            fileType: 'pdf',
-            mimeType: 'application/pdf',
-            fileSizeBytes: 2457600, // 2.4 MB
-            storageKey: 'resumes/1.pdf',
-            category: 'Personal Documents',
-            tags: ['resume', 'work'],
-            status: 'available',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-          {
-            _id: '2',
-            userId: user?._id || '1',
-            name: 'ID Card.jpg',
-            originalFileName: 'ID Card.jpg',
-            fileType: 'jpg',
-            mimeType: 'image/jpeg',
-            fileSizeBytes: 1126400, // 1.1 MB
-            storageKey: 'id/2.jpg',
-            category: 'Identity Proof',
-            tags: ['id', 'proof'],
-            status: 'available',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-          {
-            _id: '3',
-            userId: user?._id || '1',
-            name: 'Notes.pdf',
-            originalFileName: 'Notes.pdf',
-            fileType: 'pdf',
-            mimeType: 'application/pdf',
-            fileSizeBytes: 876544, // 856 KB
-            storageKey: 'notes/3.pdf',
-            category: 'Education Documents',
-            tags: ['study'],
-            status: 'available',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        ]);
+        serverDocs = deduplicateDocuments(docsRes.documents);
       }
     } catch (e) {
-      // Fallback
+      // Offline fallback
+    }
+
+    allDocs = deduplicateDocuments([...serverDocs, ...localDocs]);
+
+    // Sort by createdAt desc
+    allDocs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    // Display maximum of 10 recent documents
+    setRecentDocs(allDocs.slice(0, 10));
+
+    // Update storage stats
+    try {
+      const storageRes = await storageService.getStorageInfo();
+      const realUsedBytes = allDocs.reduce((acc, d) => acc + (d.fileSizeBytes || 0), 0);
+      setStorage({
+        ...storageRes,
+        usedBytes: storageRes.usedBytes || realUsedBytes,
+        documentCount: allDocs.length,
+      });
+    } catch (e) {
+      const realUsedBytes = allDocs.reduce((acc, d) => acc + (d.fileSizeBytes || 0), 0);
+      setStorage((prev) => ({
+        ...prev,
+        usedBytes: realUsedBytes,
+        documentCount: allDocs.length,
+      }));
     }
   };
+
+  useFocusEffect(
+    useCallback(() => {
+      loadDashboardData();
+    }, [])
+  );
 
   useEffect(() => {
     loadDashboardData();
@@ -114,38 +107,46 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
     setRefreshing(false);
   };
 
+  // Navigates to My Docs tab
+  const handleSeeAll = () => {
+    try {
+      navigation.navigate('MainTabs', { screen: 'DocumentsTab' });
+    } catch {
+      navigation.navigate('DocumentsTab');
+    }
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#F8F9FE" translucent={false} />
       <ScrollView
         contentContainerStyle={styles.scrollContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} />}
       >
-        {/* Greeting Header with Search Icon on Notification Left Side */}
+        {/* Top Header / Greeting */}
         <View style={styles.header}>
           <View style={styles.greetingContainer}>
             <View style={styles.greetingRow}>
-              <Text style={styles.greeting} numberOfLines={1}>
-                Hello, {user?.name || user?.email?.split('@')[0] || 'dhanu.sri'}
+              <Text style={styles.greeting}>
+                Hello, {user?.name || 'User'}
               </Text>
               <Text style={styles.waveEmoji}>👋</Text>
             </View>
             <Text style={styles.greetingSub}>Your documents are safe with us!</Text>
           </View>
 
+          {/* Action Icons */}
           <View style={styles.headerActions}>
-            {/* Search Symbol Button - on Notification Left Side */}
             <TouchableOpacity
               style={styles.headerButton}
               onPress={() => navigation.navigate('Search')}
               activeOpacity={0.7}
-              accessibilityLabel="Search documents"
+              accessibilityLabel="Search"
             >
               <SearchIcon size={20} color={colors.text} />
             </TouchableOpacity>
 
-            {/* Notification Bell Button */}
             <TouchableOpacity
               style={styles.headerButton}
               onPress={() => navigation.navigate('Notifications')}
@@ -166,7 +167,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
               <Text style={{ fontSize: 18 }}>📁</Text>
             </View>
             <Text style={styles.statLabel}>Total Documents</Text>
-            <Text style={styles.statValue}>{storage.documentCount || 24}</Text>
+            <Text style={styles.statValue}>{storage.documentCount || 0}</Text>
           </View>
 
           {/* Storage Used Card */}
@@ -180,42 +181,37 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
             </View>
             <Text style={styles.statLabel}>Storage Used</Text>
             <Text style={styles.statValue}>
-              {formatBytes(storage.usedBytes || 256901120)}
+              {formatBytes(storage.usedBytes || 0)}
             </Text>
           </TouchableOpacity>
         </View>
 
-        {/* Recent Documents Section */}
+        {/* Recent Documents Section Header */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Recent Documents</Text>
-          <TouchableOpacity onPress={() => navigation.navigate('DocumentsTab')}>
+          <TouchableOpacity onPress={handleSeeAll} activeOpacity={0.7}>
             <Text style={styles.seeAllText}>See All &gt;</Text>
           </TouchableOpacity>
         </View>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.recentDocsScroll}>
-          {recentDocs.map((doc) => {
-            const isPdf = doc.fileType === 'pdf';
-            return (
-              <TouchableOpacity
-                key={doc._id}
-                style={styles.docThumbnailCard}
+        {/* Recent Documents Vertical List View (Max 10) */}
+        {recentDocs.length === 0 ? (
+          <View style={styles.emptyRecentBox}>
+            <Text style={styles.emptyRecentIcon}>📂</Text>
+            <Text style={styles.emptyRecentText}>No documents uploaded yet</Text>
+          </View>
+        ) : (
+          <View style={styles.recentDocsList}>
+            {recentDocs.slice(0, 10).map((doc, index) => (
+              <DocScanCard
+                key={doc._id || `doc_${index}`}
+                document={doc}
                 onPress={() => navigation.navigate('DocumentDetail', { document: doc })}
-                activeOpacity={0.8}
-              >
-                <View style={[styles.fileTypeBadge, { backgroundColor: isPdf ? '#FEE2E2' : '#DBEAFE' }]}>
-                  <Text style={[styles.fileTypeText, { color: isPdf ? colors.pdfRed : colors.imageBlue }]}>
-                    {doc.fileType.toUpperCase()}
-                  </Text>
-                </View>
-                <Text style={styles.docCardName} numberOfLines={1}>
-                  {doc.name}
-                </Text>
-                <Text style={styles.docCardSize}>{formatBytes(doc.fileSizeBytes)}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+                onPressOptions={() => navigation.navigate('DocumentDetail', { document: doc })}
+              />
+            ))}
+          </View>
+        )}
       </ScrollView>
 
       {/* Doc Scanner Floating Dual Action Pill [ Camera | Plus ] */}
@@ -236,7 +232,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 20,
     paddingTop: Platform.OS === 'ios' ? 24 : 26,
-    paddingBottom: 32,
+    paddingBottom: 40,
   },
   header: {
     flexDirection: 'row',
@@ -296,7 +292,7 @@ const styles = StyleSheet.create({
   statsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: 20,
   },
   statCard: {
     flex: 0.48,
@@ -324,74 +320,11 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginTop: 4,
   },
-  actionGridRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  quickScanGridCard: {
-    flex: 0.48,
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.lg,
-    padding: 16,
-    justifyContent: 'space-between',
-    minHeight: 114,
-    ...shadows.glow,
-  },
-  scanGridIconBadge: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.22)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-  quickScanGridTitle: {
-    color: '#FFFFFF',
-    fontSize: typography.fontSizes.base,
-    fontWeight: typography.fontWeights.bold,
-  },
-  quickScanGridSub: {
-    color: '#E0D4FC',
-    fontSize: typography.fontSizes.xs,
-    marginTop: 2,
-  },
-  uploadGridCard: {
-    flex: 0.48,
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    padding: 16,
-    borderWidth: 1.5,
-    borderColor: '#EDE9FE',
-    justifyContent: 'space-between',
-    minHeight: 114,
-    ...shadows.card,
-  },
-  uploadGridIconBadge: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: '#EDE9FE',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-  uploadGridTitle: {
-    color: colors.text,
-    fontSize: typography.fontSizes.base,
-    fontWeight: typography.fontWeights.bold,
-  },
-  uploadGridSub: {
-    color: colors.textSecondary,
-    fontSize: typography.fontSizes.xs,
-    marginTop: 2,
-  },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 12,
   },
   sectionTitle: {
     fontSize: typography.fontSizes.lg,
@@ -403,41 +336,104 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontWeight: typography.fontWeights.semiBold,
   },
-  recentDocsScroll: {
-    marginHorizontal: -20,
-    paddingHorizontal: 20,
+  recentDocsList: {
+    flexDirection: 'column',
+    gap: 10,
+    marginBottom: 20,
   },
-  docThumbnailCard: {
-    width: 110,
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
-    padding: 12,
-    marginRight: 12,
+  recentDocCard: {
+    flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
     ...shadows.card,
   },
-  fileTypeBadge: {
-    width: 48,
-    height: 52,
-    borderRadius: 8,
+  docThumbBox: {
+    width: 46,
+    height: 48,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 12,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  thumbImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 10,
+  },
+  docTypeIcon: {
+    fontSize: 20,
+  },
+  typePill: {
+    position: 'absolute',
+    bottom: 2,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 3,
+  },
+  typePillText: {
+    color: '#FFFFFF',
+    fontSize: 8,
+    fontWeight: '800',
+  },
+  docInfoCol: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  docNameText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 4,
+  },
+  docMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'nowrap',
+  },
+  docCategoryText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.primary,
+    maxWidth: 100,
+  },
+  docMetaDot: {
+    fontSize: 10,
+    color: '#9CA3AF',
+    marginHorizontal: 5,
+  },
+  docMetaText: {
+    fontSize: 11,
+    color: '#6B7280',
+  },
+  docChevron: {
+    fontSize: 18,
+    color: '#9CA3AF',
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
+  emptyRecentBox: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    marginBottom: 20,
+  },
+  emptyRecentIcon: {
+    fontSize: 36,
     marginBottom: 8,
   },
-  fileTypeText: {
-    fontSize: 11,
-    fontWeight: typography.fontWeights.bold,
-  },
-  docCardName: {
-    fontSize: typography.fontSizes.xs,
-    fontWeight: typography.fontWeights.medium,
-    color: colors.text,
-    textAlign: 'center',
-    marginBottom: 2,
-  },
-  docCardSize: {
-    fontSize: 10,
-    color: colors.textMuted,
+  emptyRecentText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    fontWeight: '600',
   },
 });
-

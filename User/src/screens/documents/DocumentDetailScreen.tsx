@@ -7,12 +7,17 @@ import {
   Alert,
   Image,
   Dimensions,
-  ScrollView,
+  Platform,
+  StatusBar,
+  Modal,
+  ActivityIndicator,
+  NativeModules,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, borderRadius, shadows } from '../../theme';
 import { DocumentItem } from '../../types';
 import { formatBytes, formatDate } from '../../utils/formatters';
+import { normalizeDocName } from '../../utils/documentUtils';
 import { documentService } from '../../services/api/documentService';
 import { shareService } from '../../services/shareService';
 import { pdfService, PdfPageItem, PdfExportOptions } from '../../services/pdfService';
@@ -43,10 +48,13 @@ export const DocumentDetailScreen: React.FC<{ navigation: any; route: any }> = (
 
   const [doc, setDoc] = useState<DocumentItem>(initialDoc);
   const [currentPage, setCurrentPage] = useState(1);
+  const [isSavingGallery, setIsSavingGallery] = useState(false);
+  const [isSharingPdf, setIsSharingPdf] = useState(false);
 
   // Modals
   const [ocrModalVisible, setOcrModalVisible] = useState(false);
   const [pdfToolsVisible, setPdfToolsVisible] = useState(false);
+  const [shareModalVisible, setShareModalVisible] = useState(false);
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [moveModalVisible, setMoveModalVisible] = useState(false);
 
@@ -79,59 +87,154 @@ export const DocumentDetailScreen: React.FC<{ navigation: any; route: any }> = (
   const totalPages = Math.max(1, doc.pageCount || 1);
   const imageUri = doc.localUri || doc.thumbnailUrl || doc.downloadUrl;
 
-  const handleDownload = async () => {
+  // Build page array for PDF tools
+  const pdfPages: PdfPageItem[] =
+    doc.pages && doc.pages.length > 0
+      ? doc.pages.map((uri, idx) => ({ id: `p_${idx}`, uri, rotationDeg: 0 }))
+      : [{ id: 'p_1', uri: imageUri || '', rotationDeg: 0 }];
+
+  /**
+   * Import Image: Save document image directly into device Gallery (Pictures/FIC_Locker)
+   */
+  const handleSaveToGallery = async () => {
+    if (!imageUri) {
+      Alert.alert('No Image Available', 'This document does not contain an image file to save.');
+      return;
+    }
+
+    setIsSavingGallery(true);
     try {
-      Alert.alert('Download Authorized', 'Retrieving backend download URL...');
-      const res = await documentService.getDownloadUrl(doc._id);
-      Alert.alert('Download Ready', `File ready for offline viewing (Expires in ${res.expiresInSeconds || 300}s).`);
-    } catch (e) {
-      Alert.alert('Offline Mode', 'Downloaded and cached in device storage.');
+      if (Platform.OS === 'android' && NativeModules.InAppCameraModule?.saveImageToGallery) {
+        await NativeModules.InAppCameraModule.saveImageToGallery(imageUri, doc.name);
+        Alert.alert(
+          'Saved to Gallery',
+          `"${doc.name.replace(/\.[^/.]+$/, '')}.jpg" has been saved directly to your phone's Gallery (Pictures/FIC_Locker).`,
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert('Gallery Save', 'Document image saved to device storage.');
+      }
+    } catch (err: any) {
+      console.warn('saveImageToGallery error:', err);
+      Alert.alert('Save Failed', err.message || 'Could not save image to Gallery.');
+    } finally {
+      setIsSavingGallery(false);
     }
   };
 
-  // 1-Tap WhatsApp Share
+  /**
+   * Share as PDF: Generate PDF (if needed) and open native share sheet
+   */
+  const handleShareAsPdf = async () => {
+    setShareModalVisible(false);
+    setIsSharingPdf(true);
+    try {
+      if (doc.fileType === 'pdf' && doc.localUri) {
+        await shareService.shareDocumentFile(doc.localUri, 'application/pdf', doc.name);
+      } else {
+        const result = await pdfService.createPdfFromPages(pdfPages, {
+          title: doc.name.replace(/\.[^/.]+$/, ''),
+        });
+        const pdfFileName = `${doc.name.replace(/\.[^/.]+$/, '')}.pdf`;
+        if (result.fileUri) {
+          await shareService.shareDocumentFile(result.fileUri, 'application/pdf', pdfFileName);
+        } else {
+          await shareService.shareDocument({
+            ...doc,
+            name: pdfFileName,
+            fileType: 'pdf',
+          });
+        }
+      }
+    } catch (err: any) {
+      Alert.alert('Share Error', err.message || 'Failed to prepare PDF for sharing.');
+    } finally {
+      setIsSharingPdf(false);
+    }
+  };
+
+  /**
+   * Share as Image: Share image directly via native share sheet
+   */
+  const handleShareAsImage = async () => {
+    setShareModalVisible(false);
+    try {
+      if (imageUri) {
+        await shareService.shareDocumentFile(imageUri, 'image/jpeg', doc.name);
+      } else {
+        await shareService.shareDocument(doc);
+      }
+    } catch (err: any) {
+      Alert.alert('Share Error', err.message || 'Failed to share image.');
+    }
+  };
+
+  /**
+   * Share as Link: Share secure FIC Locker vault/download link
+   */
+  const handleShareLink = async () => {
+    setShareModalVisible(false);
+    try {
+      await shareService.shareDocument(doc);
+    } catch (err: any) {
+      Alert.alert('Share Error', err.message || 'Failed to share link.');
+    }
+  };
+
+  /**
+   * Share via WhatsApp: Direct 1-tap WhatsApp sharing
+   */
   const handleShareWhatsApp = async () => {
-    await shareService.shareToWhatsApp(doc);
+    setShareModalVisible(false);
+    try {
+      await shareService.shareToWhatsApp(doc);
+    } catch (err: any) {
+      Alert.alert('WhatsApp Error', err.message || 'Could not open WhatsApp.');
+    }
   };
 
-  // 1-Tap Email Share
-  const handleShareEmail = async () => {
-    await shareService.shareToEmail(doc);
-  };
-
-  // General Share
-  const handleGeneralShare = async () => {
-    await shareService.shareDocument(doc);
-  };
-
+  /**
+   * Delete Document with confirmation dialog
+   */
   const handleDelete = () => {
-    Alert.alert('Delete Document', 'Are you sure you want to permanently delete this document?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await documentService.deleteDocument(doc._id);
-          } catch (e) {}
+    Alert.alert(
+      'Delete Document',
+      `Are you sure you want to delete "${doc.name}"? This action cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await documentService.deleteDocument(doc._id);
+            } catch (e) {}
 
-          // Remove from local cache as well
-          try {
-            const cached = await AsyncStorage.getItem('@fic_locker_offline_docs');
-            if (cached) {
-              const list: DocumentItem[] = JSON.parse(cached);
-              const updated = list.filter((d) => d._id !== doc._id && d.name !== doc.name);
-              await AsyncStorage.setItem('@fic_locker_offline_docs', JSON.stringify(updated));
-            }
-          } catch {}
+            // Remove from local cache as well (clean up any variant/duplicate of this doc)
+            try {
+              const cached = await AsyncStorage.getItem('@fic_locker_offline_docs');
+              if (cached) {
+                const list: DocumentItem[] = JSON.parse(cached);
+                const normTarget = normalizeDocName(doc.name || doc.originalFileName || '');
+                const updated = list.filter(
+                  (d) =>
+                    d._id !== doc._id &&
+                    normalizeDocName(d.name || d.originalFileName || '') !== normTarget
+                );
+                await AsyncStorage.setItem('@fic_locker_offline_docs', JSON.stringify(updated));
+              }
+            } catch {}
 
-          navigation.goBack();
+            navigation.goBack();
+          },
         },
-      },
-    ]);
+      ]
+    );
   };
 
-  // Handle PDF Tools export
+  /**
+   * Handle PDF Tools export
+   */
   const handlePdfToolsExport = async (
     format: 'pdf' | 'jpg' | 'png',
     options: PdfExportOptions,
@@ -141,18 +244,24 @@ export const DocumentDetailScreen: React.FC<{ navigation: any; route: any }> = (
     try {
       if (format === 'pdf') {
         const result = await pdfService.createPdfFromPages(finalPages, options);
+        const exportedTitle = options.title?.trim() || doc.name.replace(/\.[^/.]+$/, '');
+        const exportedFileName = `${exportedTitle}.pdf`;
         Alert.alert(
           'PDF Export Complete',
-          `Successfully generated ${finalPages.length}-page PDF (${Math.round(result.fileSizeBytes / 1024)} KB).`,
+          `Successfully generated ${finalPages.length}-page PDF "${exportedFileName}" (${Math.round(result.fileSizeBytes / 1024)} KB).`,
           [
             {
               text: 'Share PDF',
               onPress: () => {
-                shareService.shareDocument({
-                  ...doc,
-                  name: `${doc.name.replace(/\.[^/.]+$/, '')}_exported.pdf`,
-                  fileType: 'pdf',
-                });
+                if (result.fileUri) {
+                  shareService.shareDocumentFile(result.fileUri, 'application/pdf', exportedFileName);
+                } else {
+                  shareService.shareDocument({
+                    ...doc,
+                    name: exportedFileName,
+                    fileType: 'pdf',
+                  });
+                }
               },
             },
             { text: 'OK' },
@@ -166,61 +275,29 @@ export const DocumentDetailScreen: React.FC<{ navigation: any; route: any }> = (
     }
   };
 
-  // Build page array for PDF tools
-  const pdfPages: PdfPageItem[] =
-    doc.pages && doc.pages.length > 0
-      ? doc.pages.map((uri, idx) => ({ id: `p_${idx}`, uri, rotationDeg: 0 }))
-      : [{ id: 'p_1', uri: imageUri || '', rotationDeg: 0 }];
-
   return (
     <View style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn}>
-          <Text style={styles.iconBtnText}>←</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} activeOpacity={0.7}>
+          <Text style={styles.backArrow}>←</Text>
         </TouchableOpacity>
         <Text style={styles.title} numberOfLines={1}>
           {doc.fileType === 'pdf' ? 'PDF Viewer' : 'Document Viewer'}
         </Text>
         <View style={styles.headerRight}>
-          <TouchableOpacity onPress={handleDownload} style={styles.iconBtn}>
-            <Text style={styles.iconBtnText}>📥</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleGeneralShare} style={styles.iconBtn}>
-            <Text style={styles.iconBtnText}>🔗</Text>
+          <TouchableOpacity
+            style={styles.headerOcrBtn}
+            onPress={() => setOcrModalVisible(true)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.headerOcrText}>
+              {doc.ocrText ? '✓ OCR' : '📄 OCR'}
+            </Text>
           </TouchableOpacity>
         </View>
-      </View>
-
-      {/* Feature Action Buttons Strip */}
-      <View style={styles.featureStrip}>
-        <TouchableOpacity
-          style={styles.featureBtn}
-          onPress={() => setOcrModalVisible(true)}
-        >
-          <Text style={styles.featureIcon}>📄</Text>
-          <Text style={styles.featureLabel}>
-            {doc.ocrText ? '✓ OCR Extracted' : 'OCR Text'}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.featureBtn}
-          onPress={() => setPdfToolsVisible(true)}
-        >
-          <Text style={styles.featureIcon}>📚</Text>
-          <Text style={styles.featureLabel}>PDF Tools</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.featureBtn} onPress={handleShareWhatsApp}>
-          <Text style={styles.featureIcon}>💬</Text>
-          <Text style={styles.featureLabel}>WhatsApp</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.featureBtn} onPress={handleShareEmail}>
-          <Text style={styles.featureIcon}>✉️</Text>
-          <Text style={styles.featureLabel}>Email</Text>
-        </TouchableOpacity>
       </View>
 
       {/* Document Viewer Body */}
@@ -269,68 +346,203 @@ export const DocumentDetailScreen: React.FC<{ navigation: any; route: any }> = (
             <Text style={styles.cardFooterDate}>{formatDate(doc.createdAt)}</Text>
           </View>
         </View>
-      </View>
 
-      {/* Bottom Paging Controls */}
-      <View style={styles.bottomBar}>
-        <TouchableOpacity
-          onPress={() => setCurrentPage((p) => Math.max(1, p - 1))}
-          style={[styles.pageBtn, (currentPage <= 1 || totalPages <= 1) && styles.pageBtnDisabled]}
-          disabled={currentPage <= 1 || totalPages <= 1}
-        >
-          <Text
-            style={[
-              styles.pageBtnText,
-              (currentPage <= 1 || totalPages <= 1) && styles.pageBtnTextDisabled,
-            ]}
+        {/* Paging Controls Pill */}
+        <View style={styles.pagingContainer}>
+          <TouchableOpacity
+            onPress={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            style={[styles.pageBtn, (currentPage <= 1 || totalPages <= 1) && styles.pageBtnDisabled]}
+            disabled={currentPage <= 1 || totalPages <= 1}
           >
-            ◀
+            <Text
+              style={[
+                styles.pageBtnText,
+                (currentPage <= 1 || totalPages <= 1) && styles.pageBtnTextDisabled,
+              ]}
+            >
+              ◀
+            </Text>
+          </TouchableOpacity>
+
+          <Text style={styles.pageIndicator}>
+            {currentPage} / {totalPages}
           </Text>
-        </TouchableOpacity>
 
-        <Text style={styles.pageIndicator}>
-          {currentPage} / {totalPages}
-        </Text>
-
-        <TouchableOpacity
-          onPress={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-          style={[
-            styles.pageBtn,
-            (currentPage >= totalPages || totalPages <= 1) && styles.pageBtnDisabled,
-          ]}
-          disabled={currentPage >= totalPages || totalPages <= 1}
-        >
-          <Text
+          <TouchableOpacity
+            onPress={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
             style={[
-              styles.pageBtnText,
-              (currentPage >= totalPages || totalPages <= 1) && styles.pageBtnTextDisabled,
+              styles.pageBtn,
+              (currentPage >= totalPages || totalPages <= 1) && styles.pageBtnDisabled,
             ]}
+            disabled={currentPage >= totalPages || totalPages <= 1}
           >
-            ▶
-          </Text>
+            <Text
+              style={[
+                styles.pageBtnText,
+                (currentPage >= totalPages || totalPages <= 1) && styles.pageBtnTextDisabled,
+              ]}
+            >
+              ▶
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* New Fixed Bottom Action Bar */}
+      <View style={styles.bottomActionBar}>
+        {/* 1. PDF */}
+        <TouchableOpacity
+          style={styles.actionCol}
+          onPress={() => setPdfToolsVisible(true)}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.actionIconBox, { backgroundColor: '#FEE2E2' }]}>
+            <Text style={styles.actionEmoji}>📕</Text>
+          </View>
+          <Text style={styles.actionLabel}>PDF</Text>
+        </TouchableOpacity>
+
+        {/* 2. Import Image (Save to Gallery) */}
+        <TouchableOpacity
+          style={styles.actionCol}
+          onPress={handleSaveToGallery}
+          disabled={isSavingGallery}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.actionIconBox, { backgroundColor: '#E0F2FE' }]}>
+            {isSavingGallery ? (
+              <ActivityIndicator size="small" color="#0284C7" />
+            ) : (
+              <Text style={styles.actionEmoji}>🖼️</Text>
+            )}
+          </View>
+          <Text style={styles.actionLabel}>Import Image</Text>
+        </TouchableOpacity>
+
+        {/* 3. Share */}
+        <TouchableOpacity
+          style={styles.actionCol}
+          onPress={() => setShareModalVisible(true)}
+          disabled={isSharingPdf}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.actionIconBox, { backgroundColor: '#EDE9FE' }]}>
+            {isSharingPdf ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <Text style={styles.actionEmoji}>↗️</Text>
+            )}
+          </View>
+          <Text style={styles.actionLabel}>Share</Text>
+        </TouchableOpacity>
+
+        {/* 4. Delete */}
+        <TouchableOpacity
+          style={styles.actionCol}
+          onPress={handleDelete}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.actionIconBox, { backgroundColor: '#FEE2E2' }]}>
+            <Text style={styles.actionEmoji}>🗑️</Text>
+          </View>
+          <Text style={[styles.actionLabel, { color: colors.danger }]}>Delete</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Quick Action Strip (Rename, Move, Delete) */}
-      <View style={styles.metaActions}>
+      {/* Modern Share Options Modal */}
+      <Modal
+        visible={shareModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShareModalVisible(false)}
+      >
         <TouchableOpacity
-          style={styles.metaActionBtn}
-          onPress={() => setRenameModalVisible(true)}
+          style={styles.shareModalOverlay}
+          activeOpacity={1}
+          onPress={() => setShareModalVisible(false)}
         >
-          <Text style={styles.metaActionText}>✏️ Rename</Text>
-        </TouchableOpacity>
+          <View style={styles.shareModalContent} onStartShouldSetResponder={() => true}>
+            <View style={styles.shareModalHandle} />
+            <Text style={styles.shareModalTitle}>Share Document</Text>
+            <Text style={styles.shareModalSubtitle} numberOfLines={1}>
+              {doc.name}
+            </Text>
 
-        <TouchableOpacity
-          style={styles.metaActionBtn}
-          onPress={() => setMoveModalVisible(true)}
-        >
-          <Text style={styles.metaActionText}>📁 Move</Text>
-        </TouchableOpacity>
+            {/* Option 1: Share as PDF */}
+            <TouchableOpacity
+              style={styles.shareOptionCard}
+              onPress={handleShareAsPdf}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.shareOptionIconBox, { backgroundColor: '#FEE2E2' }]}>
+                <Text style={styles.shareOptionEmoji}>📕</Text>
+              </View>
+              <View style={styles.shareOptionInfo}>
+                <Text style={styles.shareOptionTitle}>Share as PDF</Text>
+                <Text style={styles.shareOptionSub}>Convert to formatted PDF document</Text>
+              </View>
+              <Text style={styles.shareOptionArrow}>›</Text>
+            </TouchableOpacity>
 
-        <TouchableOpacity style={styles.metaActionBtn} onPress={handleDelete}>
-          <Text style={[styles.metaActionText, { color: colors.danger }]}>🗑️ Delete</Text>
+            {/* Option 2: Share as Image */}
+            <TouchableOpacity
+              style={styles.shareOptionCard}
+              onPress={handleShareAsImage}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.shareOptionIconBox, { backgroundColor: '#E0F2FE' }]}>
+                <Text style={styles.shareOptionEmoji}>🖼️</Text>
+              </View>
+              <View style={styles.shareOptionInfo}>
+                <Text style={styles.shareOptionTitle}>Share as Image</Text>
+                <Text style={styles.shareOptionSub}>Share original JPG document photo</Text>
+              </View>
+              <Text style={styles.shareOptionArrow}>›</Text>
+            </TouchableOpacity>
+
+            {/* Option 3: Share Secure Link */}
+            <TouchableOpacity
+              style={styles.shareOptionCard}
+              onPress={handleShareLink}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.shareOptionIconBox, { backgroundColor: '#EDE9FE' }]}>
+                <Text style={styles.shareOptionEmoji}>🔗</Text>
+              </View>
+              <View style={styles.shareOptionInfo}>
+                <Text style={styles.shareOptionTitle}>Share Secure Link</Text>
+                <Text style={styles.shareOptionSub}>Encrypted FIC Locker vault link</Text>
+              </View>
+              <Text style={styles.shareOptionArrow}>›</Text>
+            </TouchableOpacity>
+
+            {/* Option 4: Share to WhatsApp */}
+            <TouchableOpacity
+              style={styles.shareOptionCard}
+              onPress={handleShareWhatsApp}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.shareOptionIconBox, { backgroundColor: '#DCFCE7' }]}>
+                <Text style={styles.shareOptionEmoji}>💬</Text>
+              </View>
+              <View style={styles.shareOptionInfo}>
+                <Text style={styles.shareOptionTitle}>Share via WhatsApp</Text>
+                <Text style={styles.shareOptionSub}>Direct 1-tap message sharing</Text>
+              </View>
+              <Text style={styles.shareOptionArrow}>›</Text>
+            </TouchableOpacity>
+
+            {/* Cancel Button */}
+            <TouchableOpacity
+              style={styles.shareCancelBtn}
+              onPress={() => setShareModalVisible(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.shareCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
         </TouchableOpacity>
-      </View>
+      </Modal>
 
       {/* OCR Viewer Modal */}
       <OcrViewerModal
@@ -387,78 +599,70 @@ export const DocumentDetailScreen: React.FC<{ navigation: any; route: any }> = (
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F1A',
+    backgroundColor: '#F8F9FE',
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 50,
-    paddingBottom: 12,
-    backgroundColor: '#1C1A2E',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : 52,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+    ...shadows.card,
   },
-  iconBtn: {
-    padding: 6,
+  backBtn: {
+    padding: 8,
+    marginRight: 6,
   },
-  iconBtnText: {
-    fontSize: 20,
-    color: '#FFFFFF',
+  backArrow: {
+    fontSize: 22,
+    color: '#111827',
+    fontWeight: 'bold',
   },
   title: {
     flex: 1,
-    textAlign: 'center',
     fontSize: typography.fontSizes.lg,
     fontWeight: typography.fontWeights.bold,
-    color: '#FFFFFF',
+    color: '#111827',
   },
   headerRight: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
   },
-  featureStrip: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    backgroundColor: '#161528',
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#282642',
-  },
-  featureBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#23203C',
-    paddingHorizontal: 10,
+  headerOcrBtn: {
+    backgroundColor: '#EDE9FE',
+    paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: borderRadius.pill,
-    gap: 4,
+    borderRadius: 16,
   },
-  featureIcon: {
-    fontSize: 13,
-  },
-  featureLabel: {
-    fontSize: 11,
+  headerOcrText: {
+    color: colors.primary,
     fontWeight: '700',
-    color: '#C4B5FD',
+    fontSize: 12,
   },
   viewerContainer: {
     flex: 1,
-    padding: 14,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 8,
     alignItems: 'center',
-    justifyContent: 'center',
   },
   pageCard: {
+    flex: 1,
     width: '100%',
-    height: '94%',
     backgroundColor: '#FFFFFF',
-    borderRadius: borderRadius.xl,
+    borderRadius: 18,
     padding: 16,
-    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
     ...shadows.card,
+    alignItems: 'center',
   },
   pageTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: typography.fontWeights.bold,
     color: colors.text,
     textAlign: 'center',
@@ -557,53 +761,154 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textMuted,
   },
-  bottomBar: {
+  pagingContainer: {
     flexDirection: 'row',
-    justifyContent: 'center',
     alignItems: 'center',
-    gap: 24,
-    paddingVertical: 10,
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    gap: 16,
   },
   pageBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    backgroundColor: '#26243E',
-    borderRadius: borderRadius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
   pageBtnDisabled: {
-    opacity: 0.4,
+    opacity: 0.3,
   },
   pageBtnText: {
-    color: '#FFFFFF',
-    fontSize: 14,
+    color: '#374151',
+    fontSize: 13,
     fontWeight: 'bold',
   },
   pageBtnTextDisabled: {
-    color: '#6B7280',
+    color: '#9CA3AF',
   },
   pageIndicator: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: '#111827',
   },
-  metaActions: {
+  bottomActionBar: {
     flexDirection: 'row',
     justifyContent: 'space-around',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
     paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: '#1C1A2E',
+    paddingBottom: Platform.OS === 'ios' ? 28 : 14,
     borderTopWidth: 1,
-    borderTopColor: '#282642',
+    borderTopColor: '#E5E7EB',
+    ...shadows.card,
   },
-  metaActionBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    backgroundColor: '#282542',
-    borderRadius: borderRadius.pill,
+  actionCol: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 72,
   },
-  metaActionText: {
-    fontSize: 13,
+  actionIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  actionEmoji: {
+    fontSize: 20,
+  },
+  actionLabel: {
+    fontSize: 12,
     fontWeight: '600',
-    color: '#E5E7EB',
+    color: '#374151',
+  },
+  shareModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    justifyContent: 'flex-end',
+  },
+  shareModalContent: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
+  },
+  shareModalHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: '#D1D5DB',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  shareModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+    textAlign: 'center',
+  },
+  shareModalSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 4,
+    marginBottom: 18,
+  },
+  shareOptionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    backgroundColor: '#F8F9FE',
+    borderRadius: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  shareOptionIconBox: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  shareOptionEmoji: {
+    fontSize: 20,
+  },
+  shareOptionInfo: {
+    flex: 1,
+  },
+  shareOptionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  shareOptionSub: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  shareOptionArrow: {
+    fontSize: 18,
+    color: '#9CA3AF',
+    fontWeight: '700',
+  },
+  shareCancelBtn: {
+    marginTop: 6,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+  },
+  shareCancelText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#4B5563',
   },
 });

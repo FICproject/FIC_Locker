@@ -28,6 +28,7 @@ export interface DocumentAnalysisResult {
   confidence: number;
   isIsoSeries: boolean;
   suggestedSizes: PaperSize[];
+  detectedCorners?: DocumentCorners;
   normalizedBounds: {
     left: number;
     top: number;
@@ -93,6 +94,33 @@ export const PAPER_SPECS: Record<
 
 export const documentAnalysisService = {
   /**
+   * Runs OpenCV document boundary detection directly on an image file.
+   */
+  async detectDocumentCorners(imageUri: string): Promise<{
+    detected: boolean;
+    corners?: DocumentCorners;
+    paperSize?: PaperSize;
+    aspectRatio?: number;
+    confidence?: number;
+  }> {
+    if (Platform.OS === 'android' && NativeModules.InAppCameraModule?.detectDocumentOnImage) {
+      try {
+        const res = await NativeModules.InAppCameraModule.detectDocumentOnImage(imageUri);
+        return {
+          detected: !!res.detected,
+          corners: res.corners,
+          paperSize: res.paperSize as PaperSize,
+          aspectRatio: res.aspectRatio,
+          confidence: res.confidence,
+        };
+      } catch (err) {
+        console.warn('Native detectDocumentOnImage error:', err);
+      }
+    }
+    return { detected: false };
+  },
+
+  /**
    * Automatically detects document boundary edges in the captured image,
    * crops and perspective-straightens to the document, and analyzes paper size.
    */
@@ -122,6 +150,7 @@ export const documentAnalysisService = {
           confidence: res.confidence || 0.96,
           isIsoSeries: !!res.isIsoSeries,
           suggestedSizes: (res.suggestedSizes as PaperSize[]) || ['A4', 'A3', 'A5'],
+          detectedCorners: corners,
           normalizedBounds: {
             left: Math.min(corners.tl.x, corners.bl.x),
             top: Math.min(corners.tl.y, corners.tr.y),
@@ -151,6 +180,7 @@ export const documentAnalysisService = {
           confidence: res.confidence || 0.95,
           isIsoSeries: !!res.isIsoSeries,
           suggestedSizes: (res.suggestedSizes as PaperSize[]) || ['A4', 'A3', 'A5'],
+          detectedCorners: res.detectedCorners,
           normalizedBounds: res.normalizedBounds || {
             left: 0.04,
             top: 0.04,

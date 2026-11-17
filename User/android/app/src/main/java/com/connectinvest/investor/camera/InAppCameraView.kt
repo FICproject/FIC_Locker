@@ -61,6 +61,9 @@ class InAppCameraView @JvmOverloads constructor(
     var currentDetectedQuad: DetectedQuad? = null
         private set
 
+    var currentSensorQuad: DetectedQuad? = null
+        private set
+
     init {
         addView(previewView)
         InAppCameraModule.activeCameraView = this
@@ -128,16 +131,19 @@ class InAppCameraView @JvmOverloads constructor(
             try {
                 cameraProvider = cameraProviderFuture.get()
 
-                val preview = Preview.Builder().build().also {
-                    it.setSurfaceProvider(previewView.surfaceProvider)
-                }
+                val preview = Preview.Builder()
+                    .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+                    .build().also {
+                        it.setSurfaceProvider(previewView.surfaceProvider)
+                    }
 
                 imageCapture = ImageCapture.Builder()
+                    .setTargetAspectRatio(AspectRatio.RATIO_4_3)
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                     .build()
 
                 imageAnalysis = ImageAnalysis.Builder()
-                    .setTargetResolution(Size(640, 480))
+                    .setTargetAspectRatio(AspectRatio.RATIO_4_3)
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
                     .build().also { analysis ->
@@ -200,10 +206,14 @@ class InAppCameraView @JvmOverloads constructor(
             } else null
 
             // 2. Map coordinates or execute secondary analyzer
-            val quad: DetectedQuad? = if (openCVResult != null) {
-                mapOpenCVResultToView(openCVResult)
+            val isRotated90or270 = rotationDegrees == 90 || rotationDegrees == 270
+            val procW = if (isRotated90or270) frameH else frameW
+            val procH = if (isRotated90or270) frameW else frameH
+
+            val quadPair: Pair<DetectedQuad, DetectedQuad>? = if (openCVResult != null) {
+                mapOpenCVResultToView(openCVResult, procW, procH)
             } else {
-                detectDocumentQuad(
+                val fallbackQuad = detectDocumentQuad(
                     buffer = buffer,
                     frameW = frameW,
                     frameH = frameH,
@@ -211,19 +221,25 @@ class InAppCameraView @JvmOverloads constructor(
                     pixelStride = pixelStride,
                     rotationDegrees = rotationDegrees
                 )
+                if (fallbackQuad != null) Pair(fallbackQuad, fallbackQuad) else null
             }
 
             post {
-                if (quad != null) {
+                if (quadPair != null) {
                     consecutiveMisses = 0
-                    currentDetectedQuad = quad
-                    emitDocumentDetectedEvent(quad)
+                    currentDetectedQuad = quadPair.first
+                    currentSensorQuad = quadPair.second
+                    emitDocumentDetectedEvent(quadPair.first, quadPair.second)
                 } else {
                     consecutiveMisses++
-                    if (consecutiveMisses >= 2) {
+                    if (consecutiveMisses >= 8) {
                         currentDetectedQuad = null
+                        currentSensorQuad = null
                         lastSmoothedQuad = null
                         emitNoDocumentEvent()
+                    } else if (currentDetectedQuad != null && currentSensorQuad != null) {
+                        // Retain last known quad with smoothing during transient frame misses
+                        emitDocumentDetectedEvent(currentDetectedQuad!!, currentSensorQuad!!)
                     }
                 }
             }
@@ -237,26 +253,53 @@ class InAppCameraView @JvmOverloads constructor(
     /**
      * Transforms native OpenCV normalized points to PreviewView normalized coordinates
      * taking into account aspect-ratio scaling, center-cropping, and temporal smoothing.
+     * Returns: Pair(viewQuad, sensorQuad)
      */
-    private fun mapOpenCVResultToView(result: DocumentDetectorOpenCV.DetectionResult): DetectedQuad {
-        val sensorPortraitW = 480f
-        val sensorPortraitH = 640f
+    private fun mapOpenCVResultToView(
+        result: DocumentDetectorOpenCV.DetectionResult,
+        procW: Int,
+        procH: Int
+    ): Pair<DetectedQuad, DetectedQuad> {
+        val sensorQuad = DetectedQuad(
+            tl = result.tl,
+            tr = result.tr,
+            br = result.br,
+            bl = result.bl,
+            confidence = result.confidence,
+            paperSize = result.paperSize,
+            aspectRatio = result.aspectRatio
+        )
 
+        val sensorAspect = procW.toFloat() / procH.toFloat()
         val viewW = previewView.width.toFloat().coerceAtLeast(1f)
         val viewH = previewView.height.toFloat().coerceAtLeast(1f)
+        val viewAspect = viewW / viewH
 
-        val scale = max(viewW / sensorPortraitW, viewH / sensorPortraitH)
-        val scaledW = sensorPortraitW * scale
-        val scaledH = sensorPortraitH * scale
-        val offsetX = (viewW - scaledW) / 2f
-        val offsetY = (viewH - scaledH) / 2f
+        val scaledW: Float
+        val scaledH: Float
+        val offsetX: Float
+        val offsetY: Float
+
+        if (viewAspect < sensorAspect) {
+            // Screen is taller/narrower than 4:3 camera stream: height fills, left & right cropped
+            scaledH = viewH
+            scaledW = viewH * sensorAspect
+            offsetX = (viewW - scaledW) / 2f
+            offsetY = 0f
+        } else {
+            // Screen is wider than camera stream: width fills, top & bottom cropped
+            scaledW = viewW
+            scaledH = viewW / sensorAspect
+            offsetX = 0f
+            offsetY = (viewH - scaledH) / 2f
+        }
 
         fun mapPoint(p: DetectedPoint): DetectedPoint {
             val pixelX = p.x * scaledW + offsetX
             val pixelY = p.y * scaledH + offsetY
             return DetectedPoint(
-                x = (pixelX / viewW).coerceIn(0.01f, 0.99f),
-                y = (pixelY / viewH).coerceIn(0.01f, 0.99f)
+                x = (pixelX / viewW).coerceIn(0.005f, 0.995f),
+                y = (pixelY / viewH).coerceIn(0.005f, 0.995f)
             )
         }
 
@@ -278,14 +321,14 @@ class InAppCameraView @JvmOverloads constructor(
             smoothedBR = normBR
             smoothedBL = normBL
         } else {
-            val alpha = 0.40f
+            val alpha = 0.45f
             smoothedTL = DetectedPoint(alpha * normTL.x + (1 - alpha) * prev.tl.x, alpha * normTL.y + (1 - alpha) * prev.tl.y)
             smoothedTR = DetectedPoint(alpha * normTR.x + (1 - alpha) * prev.tr.x, alpha * normTR.y + (1 - alpha) * prev.tr.y)
             smoothedBR = DetectedPoint(alpha * normBR.x + (1 - alpha) * prev.br.x, alpha * normBR.y + (1 - alpha) * prev.br.y)
             smoothedBL = DetectedPoint(alpha * normBL.x + (1 - alpha) * prev.bl.x, alpha * normBL.y + (1 - alpha) * prev.bl.y)
         }
 
-        val quad = DetectedQuad(
+        val viewQuad = DetectedQuad(
             tl = smoothedTL,
             tr = smoothedTR,
             br = smoothedBR,
@@ -294,8 +337,8 @@ class InAppCameraView @JvmOverloads constructor(
             paperSize = result.paperSize,
             aspectRatio = result.aspectRatio
         )
-        lastSmoothedQuad = quad
-        return quad
+        lastSmoothedQuad = viewQuad
+        return Pair(viewQuad, sensorQuad)
     }
 
     /**
@@ -410,7 +453,7 @@ class InAppCameraView @JvmOverloads constructor(
         val meanContrast = abs(meanFg - meanBg)
 
         // Rejects flat blank surfaces without document contrast
-        if (separability < 0.10 || meanContrast < 12.0) {
+        if (separability < 0.05 || meanContrast < 7.0) {
             return null
         }
 
@@ -487,12 +530,12 @@ class InAppCameraView @JvmOverloads constructor(
         }
 
         val coverage = paperPixels.toFloat() / (gridW * gridH)
-        // Document must be framed within 8% to 90% of view
-        if (coverage < 0.08f || coverage > 0.90f) {
+        // Document must be framed within 6% to 94% of view
+        if (coverage < 0.06f || coverage > 0.94f) {
             return null
         }
 
-        // Margin Clearance Check: only reject if more than 45% of outer border touches (whole-frame gradient)
+        // Margin Clearance Check: only reject if more than 65% of outer border touches (whole-frame gradient)
         var borderTouchCount = 0
         for (x in 0 until gridW) {
             if (rawMask[x]) borderTouchCount++
@@ -503,7 +546,7 @@ class InAppCameraView @JvmOverloads constructor(
             if (rawMask[y * gridW + (gridW - 1)]) borderTouchCount++
         }
         val totalBorderPx = 2 * (gridW + gridH)
-        if (borderTouchCount.toFloat() / totalBorderPx > 0.45f) {
+        if (borderTouchCount.toFloat() / totalBorderPx > 0.65f) {
             return null
         }
 
@@ -522,7 +565,7 @@ class InAppCameraView @JvmOverloads constructor(
             }
         }
 
-        if (cleanCount < (gridW * gridH * 0.10f)) {
+        if (cleanCount < (gridW * gridH * 0.06f)) {
             return null
         }
 
@@ -768,7 +811,7 @@ class InAppCameraView @JvmOverloads constructor(
         return detectedQuad
     }
 
-    private fun emitDocumentDetectedEvent(quad: DetectedQuad) {
+    private fun emitDocumentDetectedEvent(quad: DetectedQuad, sensorQuad: DetectedQuad? = null) {
         val reactContext = context as? ReactContext ?: return
         try {
             val event = Arguments.createMap().apply {
@@ -796,6 +839,29 @@ class InAppCameraView @JvmOverloads constructor(
                     })
                 }
                 putMap("corners", corners)
+
+                val sQuad = sensorQuad ?: currentSensorQuad
+                if (sQuad != null) {
+                    val sCorners = Arguments.createMap().apply {
+                        putMap("tl", Arguments.createMap().apply {
+                            putDouble("x", sQuad.tl.x.toDouble())
+                            putDouble("y", sQuad.tl.y.toDouble())
+                        })
+                        putMap("tr", Arguments.createMap().apply {
+                            putDouble("x", sQuad.tr.x.toDouble())
+                            putDouble("y", sQuad.tr.y.toDouble())
+                        })
+                        putMap("br", Arguments.createMap().apply {
+                            putDouble("x", sQuad.br.x.toDouble())
+                            putDouble("y", sQuad.br.y.toDouble())
+                        })
+                        putMap("bl", Arguments.createMap().apply {
+                            putDouble("x", sQuad.bl.x.toDouble())
+                            putDouble("y", sQuad.bl.y.toDouble())
+                        })
+                    }
+                    putMap("sensorCorners", sCorners)
+                }
             }
             reactContext
                 .getJSModule(RCTEventEmitter::class.java)
@@ -838,7 +904,17 @@ class InAppCameraView @JvmOverloads constructor(
 
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                     val savedUri = Uri.fromFile(photoFile).toString()
-                    onSuccess(savedUri, 1920, 1080)
+                    var actualW = 1920
+                    var actualH = 1080
+                    try {
+                        val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        android.graphics.BitmapFactory.decodeFile(photoFile.absolutePath, opts)
+                        if (opts.outWidth > 0 && opts.outHeight > 0) {
+                            actualW = opts.outWidth
+                            actualH = opts.outHeight
+                        }
+                    } catch (e: Exception) {}
+                    onSuccess(savedUri, actualW, actualH)
                 }
             }
         )

@@ -29,28 +29,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUser(profile);
           await AsyncStorage.setItem('@fic_locker_user_profile', JSON.stringify(profile));
         } catch (fetchErr) {
-          // If offline or endpoint not yet loaded, check cached profile
+          // If offline, check cached profile
           const cached = await AsyncStorage.getItem('@fic_locker_user_profile');
           if (cached) {
             setUser(JSON.parse(cached));
           } else {
-            // Default authenticated mock profile until backend response
-            setUser({
-              _id: 'usr_default',
-              name: 'Dhanu Sri',
-              email: 'dhanu.sri@gmail.com',
-              role: 'user',
-              status: 'active',
-              storageQuotaBytes: 1073741824, // 1 GB
-              storageUsedBytes: 256901120, // 245 MB
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            });
+            setUser(null);
           }
         }
+      } else {
+        setUser(null);
       }
     } catch (e) {
       console.warn('[AuthProvider] Auth check failed:', e);
+      setUser(null);
     } finally {
       setIsLoading(false);
     }
@@ -61,49 +53,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const login = async (email: string, pass: string) => {
-    try {
-      const res = await authService.login({ email, password: pass });
-      setUser(res.user);
-      await AsyncStorage.setItem('@fic_locker_user_profile', JSON.stringify(res.user));
-    } catch (err: any) {
-      // In development or if backend route is pending, allow smooth demo login matching user mockup
-      const mockUser: UserProfile = {
-        _id: 'usr_mock_1',
-        name: email.split('@')[0] || 'Dhanu Sri M',
-        email,
-        role: 'user',
-        status: 'active',
-        storageQuotaBytes: 1073741824, // 1 GB
-        storageUsedBytes: 256901120, // 245 MB
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      setUser(mockUser);
-      await AsyncStorage.setItem('@fic_locker_user_profile', JSON.stringify(mockUser));
-    }
+    const res = await authService.login({ email, password: pass });
+    setUser(res.user);
+    await AsyncStorage.setItem('@fic_locker_user_profile', JSON.stringify(res.user));
   };
 
   const register = async (name: string, email: string, pass: string, phone?: string) => {
-    try {
-      const res = await authService.register({ name, email, password: pass, phone });
-      setUser(res.user);
-      await AsyncStorage.setItem('@fic_locker_user_profile', JSON.stringify(res.user));
-    } catch (err) {
-      const mockUser: UserProfile = {
-        _id: 'usr_mock_' + Date.now(),
-        name,
-        email,
-        phone,
-        role: 'user',
-        status: 'active',
-        storageQuotaBytes: 1073741824,
-        storageUsedBytes: 0,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      setUser(mockUser);
-      await AsyncStorage.setItem('@fic_locker_user_profile', JSON.stringify(mockUser));
-    }
+    const res = await authService.register({ name, email, password: pass, phone });
+    setUser(res.user);
+    await AsyncStorage.setItem('@fic_locker_user_profile', JSON.stringify(res.user));
   };
 
   const logout = async () => {

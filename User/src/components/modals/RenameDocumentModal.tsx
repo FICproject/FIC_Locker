@@ -12,6 +12,7 @@ import { colors, typography, borderRadius } from '../../theme';
 import { DocumentItem } from '../../types';
 import { documentService } from '../../services/api/documentService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { deduplicateDocuments, normalizeDocName } from '../../utils/documentUtils';
 
 interface RenameDocumentModalProps {
   visible: boolean;
@@ -65,8 +66,14 @@ export const RenameDocumentModal: React.FC<RenameDocumentModalProps> = ({
         const cachedStr = await AsyncStorage.getItem('@fic_locker_offline_docs');
         if (cachedStr) {
           const list: DocumentItem[] = JSON.parse(cachedStr);
-          const updated = list.map((d) => (d._id === document._id ? updatedDoc : d));
-          await AsyncStorage.setItem('@fic_locker_offline_docs', JSON.stringify(updated));
+          const normOld = normalizeDocName(document.name || document.originalFileName || '');
+          const updated = list.map((d) =>
+            d._id === document._id || normalizeDocName(d.name || d.originalFileName || '') === normOld
+              ? updatedDoc
+              : d
+          );
+          const cleanUpdated = deduplicateDocuments(updated);
+          await AsyncStorage.setItem('@fic_locker_offline_docs', JSON.stringify(cleanUpdated));
         }
       } catch {}
 

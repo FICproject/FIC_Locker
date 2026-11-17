@@ -6,6 +6,7 @@ import { PlatformSettings } from '../models/PlatformSettings';
 import { DocumentCategory } from '../models/Category';
 import { Plan } from '../models/PlanAndSubscription';
 import { User } from '../models/User';
+import { StoredDocument } from '../models/DocumentModel';
 
 export const FIXED_ADMIN_ID = new mongoose.Types.ObjectId('6af600000000000000000001');
 export const DEFAULT_USER_ID = new mongoose.Types.ObjectId('6af600000000000000000002');
@@ -95,18 +96,16 @@ export async function ensureBaselineSeed(): Promise<void> {
     await Plan.insertMany(DEFAULT_PLANS);
   }
 
-  const userCount = await User.countDocuments({});
-  if (userCount === 0) {
-    await User.create({
-      _id: DEFAULT_USER_ID,
-      fullName: 'Dhanu Sri',
-      email: 'dhanu.sri@gmail.com',
-      status: 'active',
-      isEmailVerified: true,
-      storageUsedBytes: 0,
-      totalDocuments: 0,
-    });
-    console.info('[Bootstrap] Seeded default user (Dhanu Sri).');
-  }
+  // Remove any legacy mock documents
+  await StoredDocument.deleteMany({
+    name: {
+      $in: [
+        'University_Degree_Transcript.pdf',
+        'Annual_Tax_Statement_2025.pdf',
+        'Project_Documentation_Plan.pdf',
+        'National_Identity_Card.jpg',
+      ],
+    },
+  });
 }
 

@@ -31,6 +31,46 @@ userSharedRouter.get(
   })
 );
 
+userSharedRouter.post(
+  '/categories',
+  asyncHandler(async (req: Request, res: Response) => {
+    const { name, description, icon, color } = req.body;
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ success: false, message: 'Category name is required' });
+    }
+    const cleanName = name.trim();
+    const slug = cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    let category = await DocumentCategory.findOne({
+      $or: [{ name: cleanName }, { slug }],
+    });
+    if (!category) {
+      category = await DocumentCategory.create({
+        name: cleanName,
+        slug,
+        description: description ? String(description).trim() : '',
+        icon: icon || 'folder',
+        color: color || '#6C47FF',
+        isActive: true,
+        isSystemDefault: false,
+      });
+    }
+    return res.status(201).json({
+      success: true,
+      category: {
+        _id: category._id.toString(),
+        id: category._id.toString(),
+        name: category.name,
+        slug: category.slug,
+        description: category.description,
+        icon: category.icon,
+        color: category.color || '#6C47FF',
+        isSystemDefault: !!category.isSystemDefault,
+        isActive: category.isActive !== false,
+      },
+    });
+  })
+);
+
 // 2. Folders
 userSharedRouter.get(
   '/folders',

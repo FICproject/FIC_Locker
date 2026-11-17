@@ -1,10 +1,13 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import mongoose from 'mongoose';
 import { authenticateAdmin } from '../../middleware/authenticateAdmin';
 import { asyncHandler, HttpError, parsePagination, sendSuccess } from '../../utils/apiResponse';
 import { StoredDocument, UploadSession } from '../../models/DocumentModel';
+import { DocumentCategory } from '../../models/Category';
+import { User } from '../../models/User';
 import { recordAuditLog, resolveSourceApp } from '../../services/auditService';
-import { generatePresignedDocumentUrl } from '../../services/s3Service';
+import { generatePresignedDocumentUrl } from '../../services/cloudinaryService';
 
 const router = Router();
 router.use(authenticateAdmin);
@@ -30,8 +33,34 @@ router.get(
     const status = String(req.query.status || '').trim();
 
     const filter: Record<string, unknown> = {};
-    if (userId) filter.ownerId = userId;
-    if (categoryId) filter.categoryId = categoryId;
+    if (userId) {
+      if (mongoose.Types.ObjectId.isValid(userId)) {
+        filter.ownerId = new mongoose.Types.ObjectId(userId);
+      } else {
+        const defaultUser = await User.findOne({ status: { $ne: 'deleted' } });
+        if (defaultUser) {
+          filter.ownerId = defaultUser._id;
+        } else {
+          filter.ownerId = userId;
+        }
+      }
+    }
+    const categoryQuery = String(req.query.categoryId || req.query.category || '').trim();
+    if (categoryQuery) {
+      if (mongoose.Types.ObjectId.isValid(categoryQuery)) {
+        filter.categoryId = new mongoose.Types.ObjectId(categoryQuery);
+      } else {
+        const foundCat = await DocumentCategory.findOne({
+          $or: [
+            { name: { $regex: `^${categoryQuery}$`, $options: 'i' } },
+            { slug: categoryQuery.toLowerCase().replace(/[^a-z0-9]+/g, '-') },
+          ],
+        });
+        if (foundCat) {
+          filter.categoryId = foundCat._id;
+        }
+      }
+    }
     if (status && status !== 'all') filter.status = status;
     if (search) {
       filter.$or = [

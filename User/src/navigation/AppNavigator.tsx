@@ -24,6 +24,8 @@ import { SupportScreen } from '../screens/support/SupportScreen';
 import { FoldersScreen } from '../screens/folders/FoldersScreen';
 import { NotificationsScreen } from '../screens/notifications/NotificationsScreen';
 import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen';
+import { CategoryDetailScreen } from '../screens/categories/CategoryDetailScreen';
+import { PdfToolDetailScreen } from '../screens/tools/PdfToolDetailScreen';
 
 // Icons
 import {
@@ -119,6 +121,8 @@ export const AppNavigator = () => {
       <Stack.Screen name="Folders" component={FoldersScreen} />
       <Stack.Screen name="Notifications" component={NotificationsScreen} />
       <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+      <Stack.Screen name="CategoryDetail" component={CategoryDetailScreen} />
+      <Stack.Screen name="PdfToolDetail" component={PdfToolDetailScreen} />
     </Stack.Navigator>
   );
 };

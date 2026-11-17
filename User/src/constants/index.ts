@@ -7,6 +7,8 @@ export function setApiHostOverride(host: string) {
 }
 
 export const DEV_CANDIDATE_HOSTS = [
+  '192.168.0.114',
+  '192.168.100.110',
   '192.168.0.175',
   '10.0.2.2',
   '127.0.0.1',
@@ -22,7 +24,7 @@ export function resolveDevHost(): string {
       return match[1];
     }
   }
-  return Platform.OS === 'android' ? '192.168.0.175' : 'localhost';
+  return Platform.OS === 'android' ? '192.168.0.114' : 'localhost';
 }
 
 export const API_CONFIG = {

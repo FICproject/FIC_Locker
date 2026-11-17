@@ -128,5 +128,49 @@ export const categoryService = {
     // 3. Fallback to cached or default
     return this.getCachedCategories();
   },
+
+  async createCategory(data: { name: string; description?: string; icon?: string; color?: string }): Promise<CategoryItem> {
+    try {
+      const res = await apiClient.post<any>(API_CONFIG.ENDPOINTS.CATEGORIES, data);
+      const cat = res.data?.category || res.data?.data;
+      if (cat) {
+        const cached = await this.getCachedCategories();
+        const updated = [...cached.filter((c) => c.name.toLowerCase() !== data.name.toLowerCase()), cat];
+        await AsyncStorage.setItem(CATEGORIES_CACHE_KEY, JSON.stringify(updated));
+        return cat;
+      }
+    } catch (err) {
+      console.warn('[categoryService] Direct post failed, trying candidate hosts...', err);
+      for (const host of DEV_CANDIDATE_HOSTS) {
+        try {
+          const res = await axios.post(`http://${host}:5000/api/v1${API_CONFIG.ENDPOINTS.CATEGORIES}`, data, { timeout: 3500 });
+          const cat = res.data?.category || res.data?.data;
+          if (cat) {
+            setApiHostOverride(host);
+            const cached = await this.getCachedCategories();
+            const updated = [...cached.filter((c) => c.name.toLowerCase() !== data.name.toLowerCase()), cat];
+            await AsyncStorage.setItem(CATEGORIES_CACHE_KEY, JSON.stringify(updated));
+            return cat;
+          }
+        } catch {}
+      }
+    }
+
+    // Local offline category creation fallback
+    const localCat: CategoryItem = {
+      id: `cat_local_${Date.now()}`,
+      _id: `cat_local_${Date.now()}`,
+      name: data.name.trim(),
+      description: data.description || '',
+      icon: data.icon || 'folder',
+      color: data.color || '#6C47FF',
+      isActive: true,
+      isSystemDefault: false,
+    };
+    const cached = await this.getCachedCategories();
+    const updated = [...cached, localCat];
+    await AsyncStorage.setItem(CATEGORIES_CACHE_KEY, JSON.stringify(updated));
+    return localCat;
+  },
 };
 

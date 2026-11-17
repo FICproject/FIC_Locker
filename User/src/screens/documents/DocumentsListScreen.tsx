@@ -17,10 +17,12 @@ import { colors, typography, borderRadius, shadows } from '../../theme';
 import { documentService } from '../../services/api/documentService';
 import { DocumentItem } from '../../types';
 import { formatBytes, formatDate } from '../../utils/formatters';
+import { deduplicateDocuments, normalizeDocName } from '../../utils/documentUtils';
 import { SearchIcon } from '../../assets/icons';
 import { RenameDocumentModal } from '../../components/modals/RenameDocumentModal';
 import { MoveDocumentModal } from '../../components/modals/MoveDocumentModal';
 import { DocScannerFab } from '../../components/common/DocScannerFab';
+import { DocScanCard } from '../../components/common/DocScanCard';
 import { shareService } from '../../services/shareService';
 
 const TABS = ['All', 'PDF', 'Images', 'Others'];
@@ -53,7 +55,7 @@ export const DocumentsListScreen: React.FC<{ navigation: any; route?: any }> = (
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
-  const [isGridView, setIsGridView] = useState(true);
+  const [isGridView, setIsGridView] = useState(false);
 
   // Sorting State
   const [sortOption, setSortOption] = useState<SortOption>('date_desc');
@@ -80,7 +82,11 @@ export const DocumentsListScreen: React.FC<{ navigation: any; route?: any }> = (
     try {
       const cached = await AsyncStorage.getItem('@fic_locker_offline_docs');
       if (cached) {
-        localDocs = JSON.parse(cached);
+        const parsed: DocumentItem[] = JSON.parse(cached);
+        localDocs = deduplicateDocuments(parsed);
+        if (localDocs.length !== parsed.length) {
+          await AsyncStorage.setItem('@fic_locker_offline_docs', JSON.stringify(localDocs));
+        }
       }
     } catch {}
 
@@ -88,25 +94,18 @@ export const DocumentsListScreen: React.FC<{ navigation: any; route?: any }> = (
     try {
       const res = await documentService.getDocuments({
         search: search.trim() || undefined,
+        category: selectedCategory || undefined,
         fileType: activeTab === 'PDF' ? 'pdf' : activeTab === 'Images' ? 'jpg' : undefined,
       });
       if (res && Array.isArray(res.documents)) {
-        serverDocs = res.documents;
+        serverDocs = deduplicateDocuments(res.documents);
       }
     } catch (e) {
       console.warn('[DocumentsListScreen] Failed to fetch server docs:', e);
     }
 
-    // Merge server docs and local offline docs (deduplicate by _id or name)
-    const combinedMap = new Map<string, DocumentItem>();
-    serverDocs.forEach((d) => combinedMap.set(d._id, d));
-    localDocs.forEach((d) => {
-      if (!combinedMap.has(d._id)) {
-        combinedMap.set(d._id, d);
-      }
-    });
-
-    let merged = Array.from(combinedMap.values());
+    // Merge server docs and local offline docs (strictly deduplicated: each doc shows ONLY a single time)
+    let merged = deduplicateDocuments([...serverDocs, ...localDocs]);
 
     // If active tab filter applies
     if (activeTab === 'PDF') {
@@ -127,7 +126,11 @@ export const DocumentsListScreen: React.FC<{ navigation: any; route?: any }> = (
           d.fileType !== 'pdf' &&
           d.fileType !== 'jpg' &&
           d.fileType !== 'png' &&
-          d.fileType !== 'jpeg'
+          d.fileType !== 'jpeg' &&
+          !d.name.toLowerCase().endsWith('.pdf') &&
+          !d.name.toLowerCase().endsWith('.jpg') &&
+          !d.name.toLowerCase().endsWith('.jpeg') &&
+          !d.name.toLowerCase().endsWith('.png')
       );
     }
 
@@ -146,7 +149,17 @@ export const DocumentsListScreen: React.FC<{ navigation: any; route?: any }> = (
     // Filter by selected category if navigated from Categories tab
     if (selectedCategory) {
       const catLower = selectedCategory.trim().toLowerCase();
-      merged = merged.filter((d) => (d.category || '').trim().toLowerCase() === catLower);
+      merged = merged.filter((d) => {
+        const docCat = (d.category || '').trim().toLowerCase();
+        if (!docCat) return false;
+        return (
+          docCat === catLower ||
+          docCat.includes(catLower) ||
+          catLower.includes(docCat) ||
+          docCat.replace(/[\s-_]+/g, '').includes(catLower.replace(/[\s-_]+/g, '')) ||
+          catLower.replace(/[\s-_]+/g, '').includes(docCat.replace(/[\s-_]+/g, ''))
+        );
+      });
     }
 
     // Apply Sorting
@@ -174,8 +187,11 @@ export const DocumentsListScreen: React.FC<{ navigation: any; route?: any }> = (
 
   useFocusEffect(
     useCallback(() => {
+      if (route?.params?.category !== undefined) {
+        setSelectedCategory(route.params.category);
+      }
       fetchDocs();
-    }, [fetchDocs])
+    }, [route?.params?.category, fetchDocs])
   );
 
   useEffect(() => {
@@ -220,7 +236,12 @@ export const DocumentsListScreen: React.FC<{ navigation: any; route?: any }> = (
                   const cached = await AsyncStorage.getItem('@fic_locker_offline_docs');
                   if (cached) {
                     const list: DocumentItem[] = JSON.parse(cached);
-                    const updated = list.filter((d) => d._id !== item._id && d.name !== item.name);
+                    const normTarget = normalizeDocName(item.name || item.originalFileName || '');
+                    const updated = list.filter(
+                      (d) =>
+                        d._id !== item._id &&
+                        normalizeDocName(d.name || d.originalFileName || '') !== normTarget
+                    );
                     await AsyncStorage.setItem('@fic_locker_offline_docs', JSON.stringify(updated));
                   }
                 } catch {}
@@ -235,11 +256,21 @@ export const DocumentsListScreen: React.FC<{ navigation: any; route?: any }> = (
   };
 
   const renderItem = ({ item }: { item: DocumentItem }) => {
+    if (!isGridView) {
+      return (
+        <DocScanCard
+          document={item}
+          onPress={() => navigation.navigate('DocumentDetail', { document: item })}
+          onPressOptions={() => handleDocumentLongPress(item)}
+        />
+      );
+    }
+
     const isPdf = item.fileType === 'pdf';
     const thumbUri = item.localUri || item.thumbnailUrl;
     return (
       <TouchableOpacity
-        style={[styles.docCard, isGridView ? styles.gridCard : styles.listCard]}
+        style={[styles.docCard, styles.gridCard]}
         onPress={() => navigation.navigate('DocumentDetail', { document: item })}
         onLongPress={() => handleDocumentLongPress(item)}
         activeOpacity={0.8}
