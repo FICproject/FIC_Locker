@@ -301,6 +301,9 @@ export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
         tags: ['scanned', currentPaperSize.toLowerCase(), 'doc_scanner'],
         status: 'available',
         localUri: result.fileUri || pages[0]?.uri,
+        thumbnailUrl: pages[0]?.uri || result.fileUri,
+        pageCount: pages.length || 1,
+        pages: pages.map((p) => p.uri).filter(Boolean),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };

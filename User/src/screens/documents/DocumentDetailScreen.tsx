@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   Modal,
   ActivityIndicator,
   NativeModules,
+  ScrollView,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, borderRadius, shadows } from '../../theme';
@@ -51,6 +52,10 @@ export const DocumentDetailScreen: React.FC<{ navigation: any; route: any }> = (
   const [isSavingGallery, setIsSavingGallery] = useState(false);
   const [isSharingPdf, setIsSharingPdf] = useState(false);
 
+  // Horizontal paging scroll reference & measured layout width
+  const scrollRef = useRef<ScrollView>(null);
+  const [wrapperWidth, setWrapperWidth] = useState<number>(SCREEN_WIDTH - 64);
+
   // Modals
   const [ocrModalVisible, setOcrModalVisible] = useState(false);
   const [pdfToolsVisible, setPdfToolsVisible] = useState(false);
@@ -58,46 +63,89 @@ export const DocumentDetailScreen: React.FC<{ navigation: any; route: any }> = (
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [moveModalVisible, setMoveModalVisible] = useState(false);
 
-  // If localUri was not in route params, look up matching document in local cache
+  // Sync document pages and details from local offline cache
   useEffect(() => {
     (async () => {
-      if (!doc.localUri && !doc.thumbnailUrl) {
-        try {
-          const cached = await AsyncStorage.getItem('@fic_locker_offline_docs');
-          if (cached) {
-            const list: DocumentItem[] = JSON.parse(cached);
-            const found = list.find((d) => d._id === doc._id || d.name === doc.name);
-            if (found && (found.localUri || found.thumbnailUrl)) {
-              setDoc((prev) => ({
+      try {
+        const cached = await AsyncStorage.getItem('@fic_locker_offline_docs');
+        if (cached) {
+          const list: DocumentItem[] = JSON.parse(cached);
+          const found = list.find((d) => d._id === doc._id || d.name === doc.name);
+          if (found) {
+            setDoc((prev) => {
+              const mergedPages = (found.pages && found.pages.length > 0) ? found.pages : prev.pages;
+              const mergedCount = Math.max(
+                found.pageCount || 1,
+                mergedPages ? mergedPages.length : 1,
+                prev.pageCount || 1
+              );
+              return {
                 ...prev,
-                localUri: found.localUri || found.thumbnailUrl,
-                thumbnailUrl: found.thumbnailUrl || found.localUri,
-                pageCount: found.pageCount || 1,
-                ocrText: found.ocrText || prev.ocrText,
-              }));
-            }
+                localUri: prev.localUri || found.localUri || found.thumbnailUrl,
+                thumbnailUrl: prev.thumbnailUrl || found.thumbnailUrl || found.localUri,
+                pages: mergedPages,
+                pageCount: mergedCount,
+                ocrText: prev.ocrText || found.ocrText,
+              };
+            });
           }
-        } catch {
-          // ignore cache read error
         }
+      } catch (err) {
+        console.warn('Failed to load cached doc pages:', err);
       }
     })();
   }, [doc._id, doc.name]);
 
-  const totalPages = Math.max(1, doc.pageCount || 1);
-  const imageUri = doc.localUri || doc.thumbnailUrl || doc.downloadUrl;
+  // Build page URIs list for horizontal paging & viewer
+  const pageList: string[] = useMemo(() => {
+    if (doc.pages && Array.isArray(doc.pages) && doc.pages.length > 0) {
+      return doc.pages.filter(Boolean);
+    }
+    const baseUri = doc.localUri || doc.thumbnailUrl || doc.downloadUrl || '';
+    if (!baseUri) return [];
+
+    const count = Math.max(1, doc.pageCount || 1);
+    if (count > 1) {
+      return Array.from({ length: count }, (_, idx) => {
+        if (doc.pages && doc.pages[idx]) return doc.pages[idx];
+        return baseUri;
+      });
+    }
+
+    return [baseUri];
+  }, [doc.pages, doc.pageCount, doc.localUri, doc.thumbnailUrl, doc.downloadUrl]);
+
+  const totalPages = Math.max(1, pageList.length, doc.pageCount || 1);
+  const activeImageUri = pageList[currentPage - 1] || doc.localUri || doc.thumbnailUrl || doc.downloadUrl;
 
   // Build page array for PDF tools
   const pdfPages: PdfPageItem[] =
-    doc.pages && doc.pages.length > 0
-      ? doc.pages.map((uri, idx) => ({ id: `p_${idx}`, uri, rotationDeg: 0 }))
-      : [{ id: 'p_1', uri: imageUri || '', rotationDeg: 0 }];
+    pageList.length > 0
+      ? pageList.map((uri, idx) => ({ id: `p_${idx + 1}`, uri, rotationDeg: 0 }))
+      : [{ id: 'p_1', uri: activeImageUri || '', rotationDeg: 0 }];
+
+  const goToPage = (targetPage: number) => {
+    const pageNum = Math.min(totalPages, Math.max(1, targetPage));
+    setCurrentPage(pageNum);
+    scrollRef.current?.scrollTo({
+      x: (pageNum - 1) * (wrapperWidth > 0 ? wrapperWidth : SCREEN_WIDTH - 64),
+      animated: true,
+    });
+  };
+
+  const handleScrollEnd = (e: any) => {
+    const x = e.nativeEvent.contentOffset.x;
+    const width = wrapperWidth > 0 ? wrapperWidth : SCREEN_WIDTH - 64;
+    const pageIdx = Math.round(x / width);
+    const newPage = Math.min(totalPages, Math.max(1, pageIdx + 1));
+    setCurrentPage(newPage);
+  };
 
   /**
    * Import Image: Save document image directly into device Gallery (Pictures/FIC_Locker)
    */
   const handleSaveToGallery = async () => {
-    if (!imageUri) {
+    if (!activeImageUri) {
       Alert.alert('No Image Available', 'This document does not contain an image file to save.');
       return;
     }
@@ -105,10 +153,14 @@ export const DocumentDetailScreen: React.FC<{ navigation: any; route: any }> = (
     setIsSavingGallery(true);
     try {
       if (Platform.OS === 'android' && NativeModules.InAppCameraModule?.saveImageToGallery) {
-        await NativeModules.InAppCameraModule.saveImageToGallery(imageUri, doc.name);
+        const pageSuffix = totalPages > 1 ? `_page_${currentPage}` : '';
+        await NativeModules.InAppCameraModule.saveImageToGallery(
+          activeImageUri,
+          `${doc.name.replace(/\.[^/.]+$/, '')}${pageSuffix}`
+        );
         Alert.alert(
           'Saved to Gallery',
-          `"${doc.name.replace(/\.[^/.]+$/, '')}.jpg" has been saved directly to your phone's Gallery (Pictures/FIC_Locker).`,
+          `"${doc.name.replace(/\.[^/.]+$/, '')}${pageSuffix}.jpg" has been saved directly to your phone's Gallery (Pictures/FIC_Locker).`,
           [{ text: 'OK' }]
         );
       } else {
@@ -159,8 +211,8 @@ export const DocumentDetailScreen: React.FC<{ navigation: any; route: any }> = (
   const handleShareAsImage = async () => {
     setShareModalVisible(false);
     try {
-      if (imageUri) {
-        await shareService.shareDocumentFile(imageUri, 'image/jpeg', doc.name);
+      if (activeImageUri) {
+        await shareService.shareDocumentFile(activeImageUri, 'image/jpeg', doc.name);
       } else {
         await shareService.shareDocument(doc);
       }
@@ -300,20 +352,53 @@ export const DocumentDetailScreen: React.FC<{ navigation: any; route: any }> = (
         </View>
       </View>
 
-      {/* Document Viewer Body */}
+      {/* Document Viewer Body with Horizontal Paging */}
       <View style={styles.viewerContainer}>
         <View style={styles.pageCard}>
           <Text style={styles.pageTitle} numberOfLines={1}>
             {doc.name.replace(/\.[^/.]+$/, '')}
           </Text>
 
-          {imageUri ? (
-            <View style={styles.imageWrapper}>
-              <Image
-                source={{ uri: imageUri }}
-                style={styles.realPhoto}
-                resizeMode="contain"
-              />
+          {pageList.length > 0 ? (
+            <View
+              style={styles.imageWrapper}
+              onLayout={(e) => {
+                const w = e.nativeEvent.layout.width;
+                if (w > 0 && Math.abs(w - wrapperWidth) > 1) {
+                  setWrapperWidth(w);
+                }
+              }}
+            >
+              <ScrollView
+                ref={scrollRef}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                nestedScrollEnabled
+                decelerationRate="fast"
+                onMomentumScrollEnd={handleScrollEnd}
+                scrollEventThrottle={16}
+                style={{ width: '100%', height: '100%' }}
+                contentContainerStyle={{ alignItems: 'center' }}
+              >
+                {pageList.map((uri, idx) => (
+                  <View
+                    key={idx}
+                    style={{
+                      width: wrapperWidth,
+                      height: '100%',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Image
+                      source={{ uri }}
+                      style={styles.realPhoto}
+                      resizeMode="contain"
+                    />
+                  </View>
+                ))}
+              </ScrollView>
             </View>
           ) : doc.fileType === 'pdf' ? (
             <View style={styles.pdfFallbackContainer}>
@@ -350,9 +435,10 @@ export const DocumentDetailScreen: React.FC<{ navigation: any; route: any }> = (
         {/* Paging Controls Pill */}
         <View style={styles.pagingContainer}>
           <TouchableOpacity
-            onPress={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            onPress={() => goToPage(currentPage - 1)}
             style={[styles.pageBtn, (currentPage <= 1 || totalPages <= 1) && styles.pageBtnDisabled]}
             disabled={currentPage <= 1 || totalPages <= 1}
+            activeOpacity={0.7}
           >
             <Text
               style={[
@@ -369,12 +455,13 @@ export const DocumentDetailScreen: React.FC<{ navigation: any; route: any }> = (
           </Text>
 
           <TouchableOpacity
-            onPress={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            onPress={() => goToPage(currentPage + 1)}
             style={[
               styles.pageBtn,
               (currentPage >= totalPages || totalPages <= 1) && styles.pageBtnDisabled,
             ]}
             disabled={currentPage >= totalPages || totalPages <= 1}
+            activeOpacity={0.7}
           >
             <Text
               style={[
@@ -547,7 +634,7 @@ export const DocumentDetailScreen: React.FC<{ navigation: any; route: any }> = (
       {/* OCR Viewer Modal */}
       <OcrViewerModal
         visible={ocrModalVisible}
-        imageUri={imageUri || ''}
+        imageUri={activeImageUri || ''}
         documentTitle={doc.name}
         category={doc.category}
         existingOcrText={doc.ocrText}
