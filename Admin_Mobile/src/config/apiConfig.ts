@@ -1,5 +1,7 @@
 import { NativeModules, Platform } from 'react-native';
 
+export const PROD_API_BASE_URL = 'https://fic-locker.onrender.com/api/v1';
+
 function resolveDevHost(): string {
   const scriptURL: string | undefined = NativeModules?.SourceCode?.scriptURL;
   if (scriptURL) {
@@ -11,6 +13,10 @@ function resolveDevHost(): string {
   return Platform.OS === 'android' ? '192.168.100.110' : 'localhost';
 }
 
-// Automatically matches localhost (USB adb reverse / iOS), 10.0.2.2 (Android emulator),
-// or LAN IP (Wi-Fi Metro). Replace with your HTTPS API domain for release builds.
-export const API_BASE_URL = `http://${resolveDevHost()}:5000/api/v1`;
+// In production release builds or when __DEV__ is false, defaults to Render cloud backend.
+// In development, uses Render or the local dev machine depending on developer preference.
+export const API_BASE_URL = __DEV__
+  ? PROD_API_BASE_URL // Connects directly to live Render backend
+  : PROD_API_BASE_URL;
+
+export const DEV_LOCAL_API_BASE_URL = `http://${resolveDevHost()}:5000/api/v1`;

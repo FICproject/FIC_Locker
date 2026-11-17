@@ -28,9 +28,18 @@ export function resolveDevHost(): string {
   return Platform.OS === 'android' ? '192.168.0.114' : 'localhost';
 }
 
+export const PROD_API_BASE_URL = 'https://fic-locker.onrender.com/api/v1';
+
 export const API_CONFIG = {
   get BASE_URL() {
-    return `http://${resolveDevHost()}:5000/api/v1`;
+    if (overrideHost) {
+      if (overrideHost.startsWith('http://') || overrideHost.startsWith('https://')) {
+        return overrideHost.endsWith('/api/v1') ? overrideHost : `${overrideHost}/api/v1`;
+      }
+      return `http://${overrideHost}:5000/api/v1`;
+    }
+    // Default to the live Render backend
+    return PROD_API_BASE_URL;
   },
   TIMEOUT: 15000,
   ENDPOINTS: {
