@@ -1,4 +1,4 @@
-package com.connectinvest.investor.camera
+package com.ficlocker.user.camera
 
 import com.facebook.react.uimanager.SimpleViewManager
 import com.facebook.react.uimanager.ThemedReactContext

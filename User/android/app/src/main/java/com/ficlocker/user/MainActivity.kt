@@ -1,4 +1,4 @@
-package com.connectinvest.investor
+package com.ficlocker.user
 
 import android.graphics.Color
 import android.os.Build

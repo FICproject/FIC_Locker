@@ -77,9 +77,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace "com.connectinvest.investor"
+    namespace "com.ficlocker.user"
     defaultConfig {
-        applicationId "com.connectinvest.investor"
+        applicationId "com.ficlocker.user"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

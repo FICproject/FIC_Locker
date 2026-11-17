@@ -1,4 +1,4 @@
-package com.connectinvest.investor.camera
+package com.ficlocker.user.camera
 
 import android.view.View
 import com.facebook.react.ReactPackage

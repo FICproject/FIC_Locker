@@ -1,4 +1,4 @@
-package com.connectinvest.investor.camera
+package com.ficlocker.user.camera
 
 import android.graphics.Bitmap
 import android.util.Log

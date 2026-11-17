@@ -1,4 +1,4 @@
-package com.connectinvest.investor
+package com.ficlocker.user
 
 import android.app.Application
 import com.facebook.react.PackageList
@@ -19,7 +19,7 @@ class MainApplication : Application(), ReactApplication {
         override fun getPackages(): List<ReactPackage> =
             PackageList(this).packages.apply {
               // Register In-App CameraX Package for native camera preview & capture
-              add(com.connectinvest.investor.camera.InAppCameraPackage())
+              add(com.ficlocker.user.camera.InAppCameraPackage())
             }
 
         override fun getJSMainModuleName(): String = "index"

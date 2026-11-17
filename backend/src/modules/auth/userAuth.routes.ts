@@ -11,7 +11,7 @@ export const userAuthRouter = Router();
 const registerSchema = z.object({
   name: z.string().min(2).max(100),
   email: z.string().email(),
-  password: z.string().min(6).max(100),
+  password: z.string().min(4).max(100),
   phone: z.string().optional(),
 });
 

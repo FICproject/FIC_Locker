@@ -1,10 +1,26 @@
-import { v2 as cloudinary } from 'cloudinary';
 import { env } from '../config/env';
 import { HttpError } from '../utils/apiResponse';
 
 let isConfigured = false;
+let cloudinaryInstance: any = null;
 
-function ensureCloudinaryConfigured(): typeof cloudinary {
+function getCloudinaryModule(): any {
+  if (!cloudinaryInstance) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const c = require('cloudinary');
+      cloudinaryInstance = c.v2 || c;
+    } catch {
+      throw new HttpError(
+        500,
+        'Cloudinary package is not installed. Please run "npm install cloudinary" or use S3 storage.'
+      );
+    }
+  }
+  return cloudinaryInstance;
+}
+
+function ensureCloudinaryConfigured(): any {
   if (!env.cloudinary.cloudName || !env.cloudinary.apiKey || !env.cloudinary.apiSecret) {
     throw new HttpError(
       503,
@@ -12,8 +28,9 @@ function ensureCloudinaryConfigured(): typeof cloudinary {
     );
   }
 
+  const client = getCloudinaryModule();
   if (!isConfigured) {
-    cloudinary.config({
+    client.config({
       cloud_name: env.cloudinary.cloudName,
       api_key: env.cloudinary.apiKey,
       api_secret: env.cloudinary.apiSecret,
@@ -22,7 +39,7 @@ function ensureCloudinaryConfigured(): typeof cloudinary {
     isConfigured = true;
   }
 
-  return cloudinary;
+  return client;
 }
 
 /**

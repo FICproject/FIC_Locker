@@ -32,6 +32,10 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) =>
       Alert.alert('Required Fields', 'Please fill in your name, email, and password.');
       return;
     }
+    if (password.length < 4) {
+      Alert.alert('Password Too Short', 'Password must be at least 4 characters long.');
+      return;
+    }
     if (password !== confirmPassword) {
       Alert.alert('Password Mismatch', 'Passwords do not match.');
       return;
@@ -42,7 +46,12 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) =>
       await register(fullName.trim(), email.trim(), password, phone.trim());
       Alert.alert('Registration Successful', 'Welcome to FIC Locker!');
     } catch (err: any) {
-      Alert.alert('Registration Error', err.response?.data?.message || 'Could not register user.');
+      const errMsg =
+        err?.response?.data?.message ||
+        err?.response?.data?.details?.[0]?.message ||
+        err?.message ||
+        'Could not register user.';
+      Alert.alert('Registration Error', errMsg);
     } finally {
       setIsSubmitting(false);
     }

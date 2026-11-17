@@ -84,7 +84,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
     try {
       await login(email.trim(), password);
     } catch (err: any) {
-      Alert.alert('Login Failed', err.response?.data?.message || 'Invalid credentials. Please verify your details.');
+      const errMsg =
+        err?.response?.data?.message ||
+        err?.response?.data?.details?.[0]?.message ||
+        err?.message ||
+        'Invalid credentials. Please verify your details.';
+      Alert.alert('Login Failed', errMsg);
     } finally {
       setIsSubmitting(false);
     }
