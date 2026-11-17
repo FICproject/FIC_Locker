@@ -8,7 +8,9 @@ import {
   Alert,
   StatusBar,
   ActivityIndicator,
+  NativeModules,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { colors, typography, borderRadius, shadows } from '../../theme';
 import { PdfToolsModal } from '../../components/modals/PdfToolsModal';
@@ -17,6 +19,9 @@ import { SignatureModal } from '../../components/modals/SignatureModal';
 import { WatermarkModal } from '../../components/modals/WatermarkModal';
 import { ocrService } from '../../services/ocrService';
 import { pdfService, PdfPageItem } from '../../services/pdfService';
+import { shareService } from '../../services/shareService';
+import { documentService } from '../../services/api/documentService';
+import { DocumentItem } from '../../types';
 
 interface ToolItem {
   id: string;
@@ -297,10 +302,93 @@ export const ToolsScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
         documentTitle={activeDocTitle}
         onExport={async (format, options, finalPages) => {
           setPdfToolsVisible(false);
-          Alert.alert(
-            'Export Successful',
-            `Document exported as ${format.toUpperCase()} (${finalPages.length} page${finalPages.length > 1 ? 's' : ''}).`
-          );
+          setLoading(true);
+          setLoadingText(`Saving ${format.toUpperCase()} to My Documents...`);
+
+          try {
+            const fileName = `${options.title || activeDocTitle || 'Scanned_Doc'}_${Date.now()}.${format}`;
+            let fileUri = finalPages[0]?.uri;
+            let fileSizeBytes = 1024 * finalPages.length * 200;
+
+            if (format === 'pdf') {
+              const pdfRes = await pdfService.createPdfFromPages(finalPages, options);
+              fileSizeBytes = pdfRes.fileSizeBytes;
+
+              // Save to actual file on disk if native module available
+              if (NativeModules.InAppCameraModule?.saveBase64ToFile) {
+                try {
+                  const savedPath = await NativeModules.InAppCameraModule.saveBase64ToFile(
+                    pdfRes.base64DataUri,
+                    fileName,
+                    'application/pdf'
+                  );
+                  if (savedPath) fileUri = savedPath;
+                } catch (e) {
+                  console.warn('Native saveBase64ToFile error:', e);
+                }
+              }
+            }
+
+            // Save to My Documents (local cache & backend sync)
+            const newDoc: DocumentItem = {
+              _id: `doc_${format}_${Date.now()}`,
+              userId: 'usr_default',
+              name: fileName,
+              originalFileName: fileName,
+              fileType: format === 'pdf' ? 'pdf' : format === 'png' ? 'png' : 'jpg',
+              mimeType: format === 'pdf' ? 'application/pdf' : `image/${format}`,
+              fileSizeBytes,
+              storageKey: `documents/${fileName}`,
+              category: 'Personal Documents',
+              tags: ['tools', format, 'scanned'],
+              status: 'available',
+              localUri: fileUri,
+              thumbnailUrl: finalPages[0]?.uri,
+              pageCount: finalPages.length,
+              pages: finalPages.map((p) => p.uri),
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+
+            const cached = await AsyncStorage.getItem('@fic_locker_offline_docs');
+            const list: DocumentItem[] = cached ? JSON.parse(cached) : [];
+            list.unshift(newDoc);
+            await AsyncStorage.setItem('@fic_locker_offline_docs', JSON.stringify(list));
+
+            // Background sync to backend
+            try {
+              documentService.syncOfflineDocuments().catch(() => {});
+            } catch {}
+
+            setLoading(false);
+
+            // Dialog with Direct Share & View Options
+            Alert.alert(
+              'Saved to My Documents',
+              `"${fileName}" (${Math.round(fileSizeBytes / 1024)} KB, ${finalPages.length} pages) has been saved as a ${format.toUpperCase()} in My Documents.`,
+              [
+                {
+                  text: '📁 View in My Docs',
+                  onPress: () => {
+                    navigation.navigate('MainTabs', { screen: 'DocumentsTab' });
+                  },
+                },
+                {
+                  text: `📤 Share ${format.toUpperCase()}`,
+                  onPress: async () => {
+                    await shareService.shareDocument(newDoc);
+                  },
+                },
+                {
+                  text: 'Done',
+                  style: 'cancel',
+                },
+              ]
+            );
+          } catch (err: any) {
+            setLoading(false);
+            Alert.alert('Save Error', err.message || 'Failed to save exported document.');
+          }
         }}
         onClose={() => setPdfToolsVisible(false)}
       />

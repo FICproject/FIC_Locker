@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,11 +11,83 @@ import {
   Platform,
   ActivityIndicator,
   ScrollView,
+  Modal,
 } from 'react-native';
+import Svg, { Polygon, Circle } from 'react-native-svg';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { colors, typography, borderRadius } from '../../theme';
 import { CornerAdjustmentModal, DocumentCorners } from '../../components/scanner/CornerAdjustmentModal';
 import { InAppCamera, InAppCameraRef } from '../../components/camera/InAppCamera';
+import {
+  documentAnalysisService,
+  DocumentAnalysisResult,
+  PaperSize,
+} from '../../services/documentAnalysisService';
+
+// 7 Real-Time Document Detection States (Adobe Scan & CamScanner Standard)
+export type DetectionState =
+  | 'looking'      // 1. No document detected – "Looking for document..."
+  | 'detected'     // 2. Document detected – "Document detected"
+  | 'partial'      // 3. Document partially visible – "Move document into frame"
+  | 'too_far'      // 4. Document too far – "Move closer"
+  | 'tilted'       // 5. Document tilted – "Align your document"
+  | 'stable'       // 6. Document stable – "Hold still..."
+  | 'ready';       // 7. Ready to capture – "Document ready"
+
+const DETECTION_STATE_CONFIG: Record<
+  DetectionState,
+  { text: string; color: string; strokeColor: string; fillColor: string; dotColor: string }
+> = {
+  looking: {
+    text: 'Looking for document...',
+    color: '#CFD8DC',
+    strokeColor: '#00E5FF',
+    fillColor: 'rgba(0, 229, 255, 0.10)',
+    dotColor: '#78909C',
+  },
+  detected: {
+    text: 'Document detected',
+    color: '#00E5FF',
+    strokeColor: '#00E5FF',
+    fillColor: 'rgba(0, 229, 255, 0.12)',
+    dotColor: '#00E5FF',
+  },
+  partial: {
+    text: 'Move document into frame',
+    color: '#FFA726',
+    strokeColor: '#FFA726',
+    fillColor: 'rgba(255, 167, 38, 0.12)',
+    dotColor: '#FFA726',
+  },
+  too_far: {
+    text: 'Move closer',
+    color: '#FFA726',
+    strokeColor: '#00E5FF',
+    fillColor: 'rgba(0, 229, 255, 0.12)',
+    dotColor: '#FFA726',
+  },
+  tilted: {
+    text: 'Align your document',
+    color: '#FFA726',
+    strokeColor: '#FFA726',
+    fillColor: 'rgba(255, 167, 38, 0.12)',
+    dotColor: '#FFA726',
+  },
+  stable: {
+    text: 'Hold still...',
+    color: '#69F0AE',
+    strokeColor: '#00E5FF',
+    fillColor: 'rgba(0, 229, 255, 0.14)',
+    dotColor: '#69F0AE',
+  },
+  ready: {
+    text: 'Document ready',
+    color: '#00E676',
+    strokeColor: '#00E676', // VIBRANT GREEN!
+    fillColor: 'rgba(0, 230, 118, 0.18)',
+    dotColor: '#00E676',
+  },
+};
 
 interface ScannerScreenProps {
   navigation: any;
@@ -24,23 +96,61 @@ interface ScannerScreenProps {
 export interface ScannedPageItem {
   id: string;
   uri: string;
+  originalUri?: string;
   rotationDeg: number;
+  paperSize?: string;
+  paperDimensions?: string;
+  confidence?: number;
 }
 
 export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
   const cameraRef = useRef<InAppCameraRef>(null);
-  const [flashOn, setFlashOn] = useState(false);
-  const [autoCapture, setAutoCapture] = useState(true);
-  const [scanMode, setScanMode] = useState<'single' | 'batch'>('batch');
-  const [isLoading, setIsLoading] = useState(false);
-  const [autoTimer, setAutoTimer] = useState<number | null>(null);
 
-  // Multi-page batch state
+  // Top Bar State (Doc Scanner Images 1, 2, 3)
+  const [flashMode, setFlashMode] = useState<'auto' | 'on' | 'off'>('auto');
+  const [gridEnabled, setGridEnabled] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showCropScreenAfterCapture, setShowCropScreenAfterCapture] = useState(true);
+
+  // Mode Carousel (Doc Scanner Images 1, 2, 3, 5: Photo | ID Card | Document | Book | Signature)
+  const [selectedMode, setSelectedMode] = useState<string>('Document');
+
+  // Auto / Manual Capture Mode
+  const [autoCapture, setAutoCapture] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
+  const [analyzingStatus, setAnalyzingStatus] = useState<string>('');
+  const [lastDetectedPaper, setLastDetectedPaper] = useState<string>('A4 (210 × 297 mm)');
+
+  // Real-Time Document Detection State (7 Detection States)
+  const [detectionState, setDetectionState] = useState<DetectionState>('looking');
+  const [detectedCorners, setDetectedCorners] = useState<DocumentCorners | null>(null);
+  const [detectedPaperInfo, setDetectedPaperInfo] = useState<{
+    size: string;
+    confidence: number;
+  } | null>(null);
+  const [isSteady, setIsSteady] = useState<boolean>(false);
+  const [viewLayout, setViewLayout] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+
+  // Developer Diagnostics Mode (Section 10)
+  const [devDebugMode, setDevDebugMode] = useState<boolean>(false);
+  const [devMetrics, setDevMetrics] = useState<{
+    processingTimeMs: number;
+    areaPercent: number;
+  }>({ processingTimeMs: 6, areaPercent: 0 });
+
+  const lastCornersRef = useRef<DocumentCorners | null>(null);
+  const steadyFrameCountRef = useRef<number>(0);
+  const isCapturingRef = useRef<boolean>(false);
+  const autoCaptureCooldownRef = useRef<number>(0);
+  const activeCornersRef = useRef<DocumentCorners | null>(null);
+
+  // Multi-page batch state (Doc Scanner Image 5)
   const [batchPages, setBatchPages] = useState<ScannedPageItem[]>([]);
 
-  // Corner adjustment modal state
+  // Corner adjustment modal state (Doc Scanner Image 4)
   const [cornerModalVisible, setCornerModalVisible] = useState(false);
   const [pendingImageUri, setPendingImageUri] = useState<string | null>(null);
+  const [pendingAnalysis, setPendingAnalysis] = useState<DocumentAnalysisResult | null>(null);
 
   const requestCameraPermission = async (): Promise<boolean> => {
     if (Platform.OS === 'android') {
@@ -64,45 +174,221 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
     return true;
   };
 
-  const processCapturedUri = (photoUri: string) => {
-    if (scanMode === 'batch') {
-      // Add to batch pages
-      const newPage: ScannedPageItem = {
-        id: `page_${Date.now()}_${batchPages.length + 1}`,
-        uri: photoUri,
-        rotationDeg: 0,
-      };
-      setBatchPages((prev) => [...prev, newPage]);
-    } else {
-      // Single page: offer corner adjustment before edit
-      setPendingImageUri(photoUri);
-      setCornerModalVisible(true);
-    }
-  };
+  const processCapturedUri = useCallback(
+    async (photoUri: string, corners?: DocumentCorners | null) => {
+      setIsLoading(true);
+      setAnalyzingStatus('Analyzing Document...');
+      try {
+        const analysis = await documentAnalysisService.analyzeAndCrop(photoUri, corners);
+        setPendingAnalysis(analysis);
+        setLastDetectedPaper(`${analysis.paperSize} (${analysis.paperDimensions})`);
 
-  const handleCapture = async () => {
-    if (isLoading) return;
-    setIsLoading(true);
+        const effectiveUri = analysis.croppedUri || photoUri;
 
-    try {
-      if (cameraRef.current) {
-        const photo = await cameraRef.current.capture();
-        if (photo?.uri) {
-          processCapturedUri(photo.uri);
-          return;
+        if (showCropScreenAfterCapture) {
+          // Open Crop / Corner Adjustment Screen (Doc Scanner Image 4)
+          setPendingImageUri(photoUri);
+          setCornerModalVisible(true);
+        } else {
+          // Directly add page to tray (Doc Scanner Image 5)
+          const newPage: ScannedPageItem = {
+            id: `page_${Date.now()}_${batchPages.length + 1}`,
+            uri: effectiveUri,
+            originalUri: photoUri,
+            rotationDeg: 0,
+            paperSize: analysis.paperSize,
+            paperDimensions: analysis.paperDimensions,
+            confidence: analysis.confidence,
+          };
+          setBatchPages((prev) => [...prev, newPage]);
+        }
+      } catch (e: any) {
+        console.warn('processCapturedUri analysis fallback:', e);
+        if (showCropScreenAfterCapture) {
+          setPendingImageUri(photoUri);
+          setCornerModalVisible(true);
+        } else {
+          const newPage: ScannedPageItem = {
+            id: `page_${Date.now()}_${batchPages.length + 1}`,
+            uri: photoUri,
+            originalUri: photoUri,
+            rotationDeg: 0,
+            paperSize: 'A4',
+            paperDimensions: '210 × 297 mm',
+          };
+          setBatchPages((prev) => [...prev, newPage]);
+        }
+      } finally {
+        setIsLoading(false);
+        setAnalyzingStatus('');
+      }
+    },
+    [batchPages.length, showCropScreenAfterCapture]
+  );
+
+  const handleCapture = useCallback(
+    async (cornersToUse?: DocumentCorners | null) => {
+      if (isLoading) return;
+      setIsLoading(true);
+      isCapturingRef.current = true;
+
+      try {
+        if (cameraRef.current) {
+          const photo = await cameraRef.current.capture();
+          if (photo?.uri) {
+            const effectiveCorners = cornersToUse || photo.detectedCorners || activeCornersRef.current || null;
+            await processCapturedUri(photo.uri, effectiveCorners);
+            return;
+          }
+        }
+
+        Alert.alert(
+          'Camera Readying',
+          'In-app camera is starting. Please ensure camera permission is granted in app settings.'
+        );
+      } catch (error: any) {
+        Alert.alert('Capture Error', error.message || 'An error occurred during capture.');
+      } finally {
+        setIsLoading(false);
+        isCapturingRef.current = false;
+      }
+    },
+    [isLoading, processCapturedUri]
+  );
+
+  // Document Detection Stream Handler (7 Real-Time Detection States)
+  const handleDocumentDetected = useCallback(
+    (event: any) => {
+      if (!event.detected || !event.corners) {
+        setDetectedCorners(null);
+        setDetectedPaperInfo(null);
+        setIsSteady(false);
+        setDetectionState('looking');
+        steadyFrameCountRef.current = 0;
+        activeCornersRef.current = null;
+        return;
+      }
+
+      const { tl, tr, br, bl } = event.corners;
+      const currentCorners: DocumentCorners = { tl, tr, br, bl };
+      setDetectedCorners(currentCorners);
+      activeCornersRef.current = currentCorners;
+      setDetectedPaperInfo({
+        size: event.paperSize || 'A4',
+        confidence: event.confidence || 0.95,
+      });
+
+      // State 3: Document partially visible – "Move document into frame"
+      const isAtMargin =
+        tl.x < 0.035 || tl.y < 0.035 ||
+        tr.x > 0.965 || tr.y < 0.035 ||
+        br.x > 0.965 || br.y > 0.965 ||
+        bl.x < 0.035 || bl.y > 0.965;
+
+      if (isAtMargin) {
+        setDetectionState('partial');
+        setIsSteady(false);
+        steadyFrameCountRef.current = 0;
+        lastCornersRef.current = currentCorners;
+        return;
+      }
+
+      // Area calculation
+      const quadArea = 0.5 * Math.abs(
+        (tl.x * tr.y - tr.x * tl.y) +
+        (tr.x * br.y - br.x * tr.y) +
+        (br.x * bl.y - bl.x * br.y) +
+        (bl.x * tl.y - tl.x * bl.y)
+      );
+
+      setDevMetrics({
+        processingTimeMs: event.processingTimeMs || 6,
+        areaPercent: Math.round(quadArea * 100),
+      });
+
+      // State 4: Document too far – "Move closer"
+      if (quadArea < 0.14) {
+        setDetectionState('too_far');
+        setIsSteady(false);
+        steadyFrameCountRef.current = 0;
+        lastCornersRef.current = currentCorners;
+        return;
+      }
+
+      // State 5: Document tilted – "Align your document"
+      const dist = (p1: { x: number; y: number }, p2: { x: number; y: number }) =>
+        Math.hypot(p1.x - p2.x, p1.y - p2.y);
+
+      const topW = dist(tl, tr);
+      const botW = dist(bl, br);
+      const leftH = dist(tl, bl);
+      const rightH = dist(tr, br);
+
+      const ratioW = Math.max(topW, botW) / Math.max(0.01, Math.min(topW, botW));
+      const ratioH = Math.max(leftH, rightH) / Math.max(0.01, Math.min(leftH, rightH));
+
+      if (ratioW > 1.48 || ratioH > 1.48) {
+        setDetectionState('tilted');
+        setIsSteady(false);
+        steadyFrameCountRef.current = 0;
+        lastCornersRef.current = currentCorners;
+        return;
+      }
+
+      // States 2, 6, 7: Position Tracking & Consecutive Frame Stability
+      const last = lastCornersRef.current;
+      let delta = 1.0;
+      if (last) {
+        delta =
+          Math.abs(tl.x - last.tl.x) +
+          Math.abs(tl.y - last.tl.y) +
+          Math.abs(tr.x - last.tr.x) +
+          Math.abs(tr.y - last.tr.y) +
+          Math.abs(br.x - last.br.x) +
+          Math.abs(br.y - last.br.y) +
+          Math.abs(bl.x - last.bl.x) +
+          Math.abs(bl.y - last.bl.y);
+      }
+
+      if (delta > 0.065) {
+        // Document moving within viewfinder
+        steadyFrameCountRef.current = 0;
+        setIsSteady(false);
+        setDetectionState('detected'); // State 2: Document detected
+      } else {
+        // Document stable across consecutive frames
+        steadyFrameCountRef.current += 1;
+        const count = steadyFrameCountRef.current;
+
+        if (count < 4) {
+          setDetectionState('detected');
+          setIsSteady(false);
+        } else if (count < 7) {
+          // State 6: Hold still...
+          setDetectionState('stable');
+          setIsSteady(true);
+        } else {
+          // State 7: Ready to capture – Outline turns VIBRANT GREEN!
+          setDetectionState('ready');
+          setIsSteady(true);
+
+          // Intelligent Auto-Capture
+          if (autoCapture && !isCapturingRef.current) {
+            const now = Date.now();
+            if (now >= autoCaptureCooldownRef.current && count >= 9) {
+              autoCaptureCooldownRef.current = now + 3500;
+              steadyFrameCountRef.current = 0;
+              setIsSteady(false);
+              handleCapture(currentCorners);
+            }
+          }
         }
       }
 
-      Alert.alert(
-        'Camera Readying',
-        'In-app camera is starting. Please ensure camera permission is granted in app settings.'
-      );
-    } catch (error: any) {
-      Alert.alert('Capture Error', error.message || 'An error occurred during capture.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+      lastCornersRef.current = currentCorners;
+    },
+    [autoCapture, handleCapture]
+  );
 
   const handleGallery = async () => {
     if (isLoading) return;
@@ -127,7 +413,7 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
 
       const firstAsset = result.assets?.[0];
       if (firstAsset?.uri) {
-        processCapturedUri(firstAsset.uri);
+        await processCapturedUri(firstAsset.uri);
       }
     } catch (error: any) {
       Alert.alert('Error', error.message || 'An error occurred while opening gallery.');
@@ -136,21 +422,31 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
     }
   };
 
-  const handleApplyCorners = (corners: DocumentCorners) => {
+  const handleApplyCorners = (
+    corners: DocumentCorners,
+    paperSize: PaperSize,
+    croppedUri?: string,
+    filterName?: string,
+    docName?: string
+  ) => {
     setCornerModalVisible(false);
-    if (pendingImageUri) {
-      navigation.navigate('ScannerEdit', {
-        pageUri: pendingImageUri,
-        pageIndex: 1,
-        corners,
-        allPages: [{ id: 'p_1', uri: pendingImageUri, rotationDeg: 0 }],
-      });
-      setPendingImageUri(null);
-    }
-  };
+    const finalUri = croppedUri || pendingAnalysis?.croppedUri || pendingImageUri;
+    const finalPaper = paperSize || pendingAnalysis?.paperSize || 'A4';
+    const finalDims = pendingAnalysis?.paperDimensions || '210 × 297 mm';
 
-  const handleDeleteBatchPage = (pageId: string) => {
-    setBatchPages((prev) => prev.filter((p) => p.id !== pageId));
+    if (finalUri) {
+      const newPage: ScannedPageItem = {
+        id: `page_${Date.now()}_${batchPages.length + 1}`,
+        uri: finalUri,
+        originalUri: pendingImageUri || finalUri,
+        rotationDeg: 0,
+        paperSize: finalPaper,
+        paperDimensions: finalDims,
+      };
+      setBatchPages((prev) => [...prev, newPage]);
+      setPendingImageUri(null);
+      setPendingAnalysis(null);
+    }
   };
 
   const handleDoneBatch = () => {
@@ -162,6 +458,8 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
     navigation.navigate('ScannerEdit', {
       pageUri: batchPages[0].uri,
       pageIndex: 1,
+      paperSize: batchPages[0].paperSize || 'A4',
+      paperDimensions: batchPages[0].paperDimensions || '210 × 297 mm',
       allPages: batchPages,
     });
   };
@@ -170,170 +468,340 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
-      {/* Camera Top Bar */}
+      {/* Camera Top Bar (Doc Scanner Images 1, 2, 3) */}
       <View style={styles.topBar}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.topIconBtn}>
-          <Text style={styles.topIconText}>✕</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.topNavBtn}>
+          <Text style={styles.topNavArrow}>←</Text>
         </TouchableOpacity>
 
-        {/* Scan Mode Selector (Batch / Single) */}
-        <View style={styles.modeSwitchContainer}>
+        <View style={styles.topRightActions}>
+          {/* Flash Mode Toggle (Auto / On / Off) */}
           <TouchableOpacity
-            style={[styles.modeSwitchBtn, scanMode === 'batch' && styles.modeSwitchBtnActive]}
-            onPress={() => setScanMode('batch')}
+            onPress={() => {
+              if (flashMode === 'auto') setFlashMode('on');
+              else if (flashMode === 'on') setFlashMode('off');
+              else setFlashMode('auto');
+            }}
+            style={styles.topActionBtn}
           >
-            <Text style={[styles.modeSwitchText, scanMode === 'batch' && styles.modeSwitchTextActive]}>
-              Multi-Page ({batchPages.length})
+            <Text style={styles.topActionIcon}>
+              {flashMode === 'auto' ? '⚡A' : flashMode === 'on' ? '⚡' : '⚡✕'}
             </Text>
           </TouchableOpacity>
 
+          {/* 3x3 Grid Toggle */}
           <TouchableOpacity
-            style={[styles.modeSwitchBtn, scanMode === 'single' && styles.modeSwitchBtnActive]}
-            onPress={() => setScanMode('single')}
+            onPress={() => setGridEnabled(!gridEnabled)}
+            style={[styles.topActionBtn, gridEnabled && styles.topActionActive]}
           >
-            <Text style={[styles.modeSwitchText, scanMode === 'single' && styles.modeSwitchTextActive]}>
-              Single
-            </Text>
+            <Text style={[styles.topActionIcon, gridEnabled && { color: '#00A3FF' }]}>#</Text>
+          </TouchableOpacity>
+
+          {/* Aspect Ratio / Full Preset */}
+          <TouchableOpacity
+            onPress={() => {
+              Alert.alert('Scan Format', `Target Mode: ${selectedMode}\nStandard: ${lastDetectedPaper}`);
+            }}
+            style={styles.topActionBtn}
+          >
+            <Text style={styles.topActionIcon}>⛶</Text>
+          </TouchableOpacity>
+
+          {/* Settings Gear (Long-press toggles Developer Diagnostics HUD) */}
+          <TouchableOpacity
+            onPress={() => setShowSettingsModal(true)}
+            onLongPress={() => {
+              setDevDebugMode((prev) => {
+                const next = !prev;
+                Alert.alert(
+                  'Developer Diagnostics',
+                  next ? 'Native OpenCV diagnostics HUD enabled' : 'Diagnostics HUD disabled'
+                );
+                return next;
+              });
+            }}
+            style={styles.topActionBtn}
+          >
+            <Text style={styles.topActionIcon}>⚙️</Text>
           </TouchableOpacity>
         </View>
-
-        <TouchableOpacity
-          onPress={() => setFlashOn(!flashOn)}
-          style={[styles.topIconBtn, flashOn && styles.flashActive]}
-        >
-          <Text style={styles.topIconText}>⚡</Text>
-        </TouchableOpacity>
       </View>
 
-      {/* Live In-App Camera Viewfinder with Edge Framing Overlay */}
-      <View style={styles.viewfinderWrapper}>
+      {/* Live In-App Camera Viewfinder */}
+      <View
+        style={styles.viewfinderWrapper}
+        onLayout={(e) => {
+          const { width, height } = e.nativeEvent.layout;
+          setViewLayout({ width, height });
+        }}
+      >
         <InAppCamera
           ref={cameraRef}
-          torchOn={flashOn}
+          torchOn={flashMode === 'on'}
           style={StyleSheet.absoluteFill}
+          onDocumentDetected={handleDocumentDetected}
         />
 
-        {/* Viewfinder Touch Overlay & Framing Guides */}
-        <TouchableOpacity
-          style={styles.viewfinderOverlay}
-          activeOpacity={0.9}
-          onPress={handleCapture}
-        >
-          <View style={styles.documentFrame}>
-            {/* Corner Guides with Glowing Borders */}
-            <View style={[styles.corner, styles.topLeft]} />
-            <View style={[styles.corner, styles.topRight]} />
-            <View style={[styles.corner, styles.bottomLeft]} />
-            <View style={[styles.corner, styles.bottomRight]} />
-
-            {/* In-Frame Status or Processing Indicator */}
-            {isLoading ? (
-              <View style={styles.captureLoadingBox}>
-                <ActivityIndicator size="large" color="#FFFFFF" />
-                <Text style={styles.captureLoadingText}>Processing capture...</Text>
-              </View>
-            ) : (
-              <View style={styles.cameraPromptContainer}>
-                <Text style={styles.promptSubtitle}>
-                  {autoCapture
-                    ? '✨ Auto Edge Detection & Perspective active'
-                    : '🎯 Align document within frame & tap to capture'}
-                </Text>
-              </View>
-            )}
-
-            <View style={styles.detectBadge}>
-              <Text style={styles.detectText}>
-                {autoCapture ? '🟢 Auto Document Edge Detected' : '🎯 Tap to Capture'}
+        {/* Developer Diagnostics HUD (Section 10) */}
+        {devDebugMode && (
+          <View style={styles.devDebugHud} pointerEvents="none">
+            <Text style={styles.devDebugTitle}>⚡ OpenCV 4.5.3 Native CV</Text>
+            <Text style={styles.devDebugText}>Latency: {devMetrics.processingTimeMs}ms (~15 FPS)</Text>
+            <Text style={styles.devDebugText}>State: {detectionState.toUpperCase()}</Text>
+            <Text style={styles.devDebugText}>Conf: {Math.round((detectedPaperInfo?.confidence || 0.95) * 100)}%</Text>
+            <Text style={styles.devDebugText}>Paper: {detectedPaperInfo?.size || 'A4'} (Area: {devMetrics.areaPercent}%)</Text>
+            {detectedCorners && (
+              <Text style={styles.devDebugText}>
+                TL:[{detectedCorners.tl.x.toFixed(2)},{detectedCorners.tl.y.toFixed(2)}] TR:[{detectedCorners.tr.x.toFixed(2)},{detectedCorners.tr.y.toFixed(2)}]
               </Text>
+            )}
+          </View>
+        )}
+
+        {/* 3x3 Rule-of-Thirds Grid Overlay */}
+        {gridEnabled && (
+          <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+            <View style={styles.gridLineH1} />
+            <View style={styles.gridLineH2} />
+            <View style={styles.gridLineV1} />
+            <View style={styles.gridLineV2} />
+          </View>
+        )}
+
+        {/* Subtle Central Focus Reticle (Doc Scanner Images 1 & 2: [ o ]) */}
+        <View style={styles.focusReticle} pointerEvents="none">
+          <View style={[styles.focusBracket, styles.bracketTL]} />
+          <View style={[styles.focusBracket, styles.bracketTR]} />
+          <View style={[styles.focusBracket, styles.bracketBL]} />
+          <View style={[styles.focusBracket, styles.bracketBR]} />
+          <View style={styles.focusCenterCircle} />
+        </View>
+
+        {/* Real-time Dynamic Doc Scanner Paper Tracking Polygon & 4 Corner Indicators (Turns GREEN when ready!) */}
+        {detectedCorners && viewLayout.width > 0 && (
+          <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            <Svg style={StyleSheet.absoluteFill}>
+              <Polygon
+                points={
+                  `${detectedCorners.tl.x * viewLayout.width},${detectedCorners.tl.y * viewLayout.height} ` +
+                  `${detectedCorners.tr.x * viewLayout.width},${detectedCorners.tr.y * viewLayout.height} ` +
+                  `${detectedCorners.br.x * viewLayout.width},${detectedCorners.br.y * viewLayout.height} ` +
+                  `${detectedCorners.bl.x * viewLayout.width},${detectedCorners.bl.y * viewLayout.height}`
+                }
+                fill={DETECTION_STATE_CONFIG[detectionState].fillColor}
+                stroke={DETECTION_STATE_CONFIG[detectionState].strokeColor}
+                strokeWidth={detectionState === 'ready' ? 2.8 : 2}
+                strokeLinejoin="round"
+              />
+              {/* 4 Corner Indicators */}
+              {[
+                detectedCorners.tl,
+                detectedCorners.tr,
+                detectedCorners.br,
+                detectedCorners.bl,
+              ].map((pt, idx) => (
+                <Circle
+                  key={idx}
+                  cx={pt.x * viewLayout.width}
+                  cy={pt.y * viewLayout.height}
+                  r={detectionState === 'ready' ? 10 : 8}
+                  fill={DETECTION_STATE_CONFIG[detectionState].strokeColor}
+                  stroke="#FFFFFF"
+                  strokeWidth="2.5"
+                />
+              ))}
+            </Svg>
+          </View>
+        )}
+
+        {/* Center Capturing Progress Indicator (When in auto-capture ready/steady) */}
+        {isSteady && autoCapture && (
+          <View style={styles.capturingCenterArc} pointerEvents="none">
+            <ActivityIndicator size="large" color={DETECTION_STATE_CONFIG[detectionState].strokeColor} />
+          </View>
+        )}
+
+        {/* Floating Status Pill (Always visible across all 7 states: Looking, Detected, Move Closer, etc.) */}
+        <View style={styles.floatingStatusPill} pointerEvents="none">
+          <View
+            style={[
+              styles.statusDot,
+              { backgroundColor: DETECTION_STATE_CONFIG[detectionState].dotColor },
+            ]}
+          />
+          <Text
+            style={[
+              styles.floatingStatusText,
+              { color: DETECTION_STATE_CONFIG[detectionState].color },
+            ]}
+          >
+            {detectionState === 'stable' && autoCapture
+              ? "Capturing... don't move"
+              : DETECTION_STATE_CONFIG[detectionState].text}
+          </Text>
+        </View>
+
+        {/* Viewfinder Loading Overlay during processing */}
+        {isLoading && (
+          <View style={styles.viewfinderOverlay} pointerEvents="auto">
+            <View style={styles.captureLoadingBox}>
+              <ActivityIndicator size="large" color="#FFFFFF" />
+              <Text style={styles.captureLoadingText}>{analyzingStatus || 'Processing capture...'}</Text>
             </View>
           </View>
-        </TouchableOpacity>
+        )}
       </View>
 
-      {/* Multi-Page Batch Thumbnail Tray */}
-      {scanMode === 'batch' && batchPages.length > 0 && (
-        <View style={styles.batchTrayContainer}>
-          <View style={styles.batchHeaderRow}>
-            <Text style={styles.batchCountLabel}>
-              📚 Scanned Pages: <Text style={{ color: colors.primary }}>{batchPages.length}</Text>
-            </Text>
-            <TouchableOpacity onPress={handleDoneBatch} style={styles.batchDoneHeaderBtn}>
-              <Text style={styles.batchDoneHeaderText}>Done ({batchPages.length}) →</Text>
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.batchThumbList}>
-            {batchPages.map((page, index) => (
-              <View key={page.id} style={styles.batchThumbCard}>
-                <Image source={{ uri: page.uri }} style={styles.batchThumbImg} resizeMode="cover" />
-                <View style={styles.batchThumbBadge}>
-                  <Text style={styles.batchThumbIndex}>{index + 1}</Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.batchDeleteBtn}
-                  onPress={() => handleDeleteBatchPage(page.id)}
-                >
-                  <Text style={styles.batchDeleteText}>✕</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-          </ScrollView>
-        </View>
-      )}
-
-      {/* Bottom Camera Controls */}
-      <View style={styles.bottomControls}>
-        {/* Gallery button */}
-        <TouchableOpacity
-          style={styles.auxButton}
-          onPress={handleGallery}
-          activeOpacity={0.7}
+      {/* Mode Carousel Bar (Doc Scanner Images 1, 2, 3, 5: Photo | ID Card | Document | Book | Signature) */}
+      <View style={styles.modeCarouselContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.modeCarouselScroll}
         >
-          <Text style={styles.auxIcon}>🖼️</Text>
-          <Text style={styles.auxLabel}>Gallery</Text>
-        </TouchableOpacity>
+          {['Photo', 'ID Card', 'Document', 'Book', 'Signature'].map((mode) => {
+            const isSelected = selectedMode === mode;
+            return (
+              <TouchableOpacity
+                key={mode}
+                style={styles.modeTabBtn}
+                onPress={() => setSelectedMode(mode)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.modeTabText, isSelected && styles.modeTabTextActive]}>
+                  {mode}
+                </Text>
+                {isSelected && <View style={styles.modeTabIndicator} />}
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
 
-        {/* Shutter Button */}
+      {/* Bottom Controls Bar (Doc Scanner Images 1, 2, 3, 5) */}
+      <View style={styles.bottomControlsBar}>
+        {/* Left Col: AUTO/MANUAL Toggle or Page Thumbnail (Doc Scanner Images 1 & 5) */}
+        <View style={styles.bottomLeftCol}>
+          {batchPages.length > 0 ? (
+            <TouchableOpacity
+              style={styles.lastThumbContainer}
+              onPress={handleDoneBatch}
+              activeOpacity={0.8}
+            >
+              <Image
+                source={{ uri: batchPages[batchPages.length - 1].uri }}
+                style={styles.lastThumbImg}
+                resizeMode="cover"
+              />
+              <View style={styles.thumbPageBadge}>
+                <Text style={styles.thumbPageBadgeText}>{batchPages.length}</Text>
+              </View>
+            </TouchableOpacity>
+          ) : null}
+
+          {/* AUTO / MANUAL Toggle (Doc Scanner Images 1, 2, 3) */}
+          <TouchableOpacity
+            style={styles.autoManualBtn}
+            onPress={() => setAutoCapture(!autoCapture)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.autoManualIcon}>{autoCapture ? '⏱️' : '👆'}</Text>
+            <Text style={styles.autoManualLabel}>{autoCapture ? 'AUTO' : 'MANUAL'}</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Center: Big Blue Circular Shutter Button with Camera Icon (Doc Scanner Images 1, 2, 3, 5) */}
         <TouchableOpacity
-          style={styles.shutterOuter}
-          onPress={handleCapture}
-          activeOpacity={0.7}
+          style={styles.shutterOuterCircle}
+          onPress={() => handleCapture()}
+          activeOpacity={0.85}
           disabled={isLoading}
         >
-          <View style={styles.shutterInner}>
-            {isLoading && <ActivityIndicator size="small" color={colors.primary} />}
+          <View style={styles.shutterInnerCircle}>
+            {isLoading ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text style={styles.shutterCameraIcon}>📷</Text>
+            )}
           </View>
         </TouchableOpacity>
 
-        {/* Auto / Manual Mode Toggle */}
-        <TouchableOpacity
-          style={styles.auxButton}
-          onPress={() => setAutoCapture(!autoCapture)}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.auxIcon}>{autoCapture ? '⚡' : '🎯'}</Text>
-          <Text style={styles.auxLabel}>{autoCapture ? 'Auto' : 'Manual'}</Text>
-        </TouchableOpacity>
+        {/* Right Col: Done Checkmark Button (Doc Scanner Image 5) or Gallery */}
+        <View style={styles.bottomRightCol}>
+          {batchPages.length > 0 ? (
+            <TouchableOpacity
+              style={styles.doneCheckBtn}
+              onPress={handleDoneBatch}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.doneCheckIcon}>✓</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.galleryBtn}
+              onPress={handleGallery}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.galleryIcon}>🖼️</Text>
+              <Text style={styles.galleryLabel}>Gallery</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
-      {/* Manual Corner Adjustment Modal */}
+      {/* Auto Crop & Paper Analysis Corner Adjustment Modal (Doc Scanner Image 4) */}
       {pendingImageUri ? (
         <CornerAdjustmentModal
           visible={cornerModalVisible}
           imageUri={pendingImageUri}
+          initialAnalysis={pendingAnalysis}
+          initialCorners={detectedCorners}
           onApply={handleApplyCorners}
           onCancel={() => {
             setCornerModalVisible(false);
-            if (pendingImageUri) {
-              navigation.navigate('ScannerEdit', {
-                pageUri: pendingImageUri,
-                pageIndex: 1,
-              });
-            }
+            setPendingImageUri(null);
+            setPendingAnalysis(null);
+          }}
+          onRetake={() => {
+            setCornerModalVisible(false);
+            setPendingImageUri(null);
+            setPendingAnalysis(null);
           }}
         />
       ) : null}
+
+      {/* Settings Modal (Doc Scanner Option) */}
+      <Modal visible={showSettingsModal} transparent animationType="fade" onRequestClose={() => setShowSettingsModal(false)}>
+        <TouchableOpacity
+          style={styles.modalBackdrop}
+          activeOpacity={1}
+          onPress={() => setShowSettingsModal(false)}
+        >
+          <View style={styles.settingsModalCard}>
+            <Text style={styles.settingsModalTitle}>Scanner Settings</Text>
+
+            <TouchableOpacity
+              style={styles.settingsRow}
+              onPress={() => setShowCropScreenAfterCapture(!showCropScreenAfterCapture)}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={styles.settingsRowTitle}>Show crop screen after every capture</Text>
+                <Text style={styles.settingsRowSub}>Allows manual border adjustment on each page</Text>
+              </View>
+              <View style={[styles.settingsToggleBox, showCropScreenAfterCapture && styles.settingsToggleActive]}>
+                {showCropScreenAfterCapture && <Text style={{ color: '#FFFFFF', fontWeight: 'bold' }}>✓</Text>}
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.settingsCloseBtn}
+              onPress={() => setShowSettingsModal(false)}
+            >
+              <Text style={styles.settingsCloseBtnText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 };
@@ -341,54 +809,41 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0A0A10',
+    backgroundColor: '#000000',
   },
   topBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 50,
-    paddingBottom: 16,
+    paddingHorizontal: 16,
+    paddingTop: 45,
+    paddingBottom: 10,
+    backgroundColor: '#000000',
+    zIndex: 10,
   },
-  topIconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+  topNavBtn: {
+    padding: 6,
+  },
+  topNavArrow: {
+    color: '#FFFFFF',
+    fontSize: 24,
+    fontWeight: '300',
+  },
+  topRightActions: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 16,
   },
-  flashActive: {
-    backgroundColor: '#F59E0B',
+  topActionBtn: {
+    padding: 6,
   },
-  topIconText: {
+  topActionActive: {
+    borderRadius: 4,
+  },
+  topActionIcon: {
     color: '#FFFFFF',
     fontSize: 18,
     fontWeight: 'bold',
-  },
-  modeSwitchContainer: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    borderRadius: borderRadius.pill,
-    padding: 3,
-  },
-  modeSwitchBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: borderRadius.pill,
-  },
-  modeSwitchBtnActive: {
-    backgroundColor: colors.primary,
-  },
-  modeSwitchText: {
-    color: '#9CA3AF',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  modeSwitchTextActive: {
-    color: '#FFFFFF',
-    fontWeight: '700',
   },
   viewfinderWrapper: {
     flex: 1,
@@ -400,232 +855,383 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 24,
   },
-  viewfinder: {
-    flex: 1,
+  // 3x3 Grid Lines
+  gridLineH1: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: '33.33%',
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+  },
+  gridLineH2: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: '66.66%',
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+  },
+  gridLineV1: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: '33.33%',
+    width: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+  },
+  gridLineV2: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: '66.66%',
+    width: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+  },
+  // Center Focus Reticle (Doc Scanner Images 1 & 2: [ o ])
+  focusReticle: {
+    position: 'absolute',
+    left: '50%',
+    top: '50%',
+    marginLeft: -35,
+    marginTop: -35,
+    width: 70,
+    height: 70,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 24,
+  },
+  focusBracket: {
+    position: 'absolute',
+    width: 16,
+    height: 16,
+    borderColor: 'rgba(255, 255, 255, 0.45)',
+  },
+  bracketTL: {
+    top: 0,
+    left: 0,
+    borderTopWidth: 2,
+    borderLeftWidth: 2,
+    borderTopLeftRadius: 5,
+  },
+  bracketTR: {
+    top: 0,
+    right: 0,
+    borderTopWidth: 2,
+    borderRightWidth: 2,
+    borderTopRightRadius: 5,
+  },
+  bracketBL: {
+    bottom: 0,
+    left: 0,
+    borderBottomWidth: 2,
+    borderLeftWidth: 2,
+    borderBottomLeftRadius: 5,
+  },
+  bracketBR: {
+    bottom: 0,
+    right: 0,
+    borderBottomWidth: 2,
+    borderRightWidth: 2,
+    borderBottomRightRadius: 5,
+  },
+  focusCenterCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.45)',
+  },
+  // Developer Diagnostics HUD (Section 10)
+  devDebugHud: {
+    position: 'absolute',
+    top: 14,
+    left: 14,
+    backgroundColor: 'rgba(0, 0, 0, 0.78)',
+    padding: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#00E5FF',
+    zIndex: 50,
+  },
+  devDebugTitle: {
+    color: '#00E5FF',
+    fontSize: 11,
+    fontWeight: 'bold',
+    marginBottom: 2,
+  },
+  devDebugText: {
+    color: '#ECEFF1',
+    fontSize: 10,
+    fontFamily: Platform.OS === 'android' ? 'monospace' : 'Courier',
+  },
+  // Capturing Center Arc (Doc Scanner Image 3)
+  capturingCenterArc: {
+    position: 'absolute',
+    left: '50%',
+    top: '50%',
+    marginLeft: -25,
+    marginTop: -25,
+    width: 50,
+    height: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 30,
+  },
+  // Floating Status Pill (7 Real-Time States with Dynamic Dot & Colors)
+  floatingStatusPill: {
+    position: 'absolute',
+    bottom: 18,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(20, 20, 25, 0.88)',
+    paddingVertical: 7,
+    paddingHorizontal: 16,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+    zIndex: 25,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  floatingStatusText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 0.2,
   },
   captureLoadingBox: {
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
     paddingHorizontal: 24,
     paddingVertical: 16,
-    borderRadius: borderRadius.lg,
+    borderRadius: 12,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(108, 71, 255, 0.4)',
   },
   captureLoadingText: {
     color: '#FFFFFF',
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '600',
     marginTop: 10,
   },
-  documentFrame: {
-    width: '100%',
-    height: '84%',
-    borderRadius: 16,
-    borderWidth: 1.5,
-    borderColor: 'rgba(108, 71, 255, 0.4)',
-    borderStyle: 'dashed',
-    position: 'relative',
+  // Mode Carousel Bar (Doc Scanner Images 1, 2, 3, 5: Photo | ID Card | Document | Book | Signature)
+  modeCarouselContainer: {
+    height: 44,
+    backgroundColor: '#000000',
     justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.02)',
   },
-  corner: {
-    position: 'absolute',
-    width: 28,
-    height: 28,
-    borderColor: colors.primary,
-  },
-  topLeft: {
-    top: -2,
-    left: -2,
-    borderTopWidth: 4,
-    borderLeftWidth: 4,
-    borderTopLeftRadius: 10,
-  },
-  topRight: {
-    top: -2,
-    right: -2,
-    borderTopWidth: 4,
-    borderRightWidth: 4,
-    borderTopRightRadius: 10,
-  },
-  bottomLeft: {
-    bottom: -2,
-    left: -2,
-    borderBottomWidth: 4,
-    borderLeftWidth: 4,
-    borderBottomLeftRadius: 10,
-  },
-  bottomRight: {
-    bottom: -2,
-    right: -2,
-    borderBottomWidth: 4,
-    borderRightWidth: 4,
-    borderBottomRightRadius: 10,
-  },
-  cameraPromptContainer: {
-    alignItems: 'center',
+  modeCarouselScroll: {
     paddingHorizontal: 20,
-  },
-  cameraIconCircle: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: 'rgba(108, 71, 255, 0.2)',
-    borderWidth: 1.5,
-    borderColor: colors.primary,
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
   },
-  cameraIconText: {
-    fontSize: 28,
-  },
-  promptTitle: {
-    fontSize: 17,
-    fontWeight: typography.fontWeights.bold,
-    color: '#FFFFFF',
-    marginBottom: 6,
-  },
-  promptSubtitle: {
-    fontSize: 12,
-    color: '#9CA3AF',
-    textAlign: 'center',
-    lineHeight: 18,
-  },
-  detectBadge: {
-    position: 'absolute',
-    bottom: 16,
-    backgroundColor: 'rgba(17, 24, 39, 0.85)',
-    borderWidth: 1,
-    borderColor: 'rgba(108, 71, 255, 0.5)',
+  modeTabBtn: {
     paddingHorizontal: 14,
     paddingVertical: 6,
-    borderRadius: borderRadius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  detectText: {
-    color: '#E5E7EB',
-    fontSize: 11,
+  modeTabText: {
+    color: '#9CA3AF',
+    fontSize: 13,
     fontWeight: '600',
   },
-  batchTrayContainer: {
-    backgroundColor: '#13131F',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#232338',
+  modeTabTextActive: {
+    color: '#00A3FF',
+    fontWeight: '700',
   },
-  batchHeaderRow: {
+  modeTabIndicator: {
+    width: 24,
+    height: 2.5,
+    backgroundColor: '#00A3FF',
+    borderRadius: 1.5,
+    marginTop: 3,
+  },
+  // Bottom Controls Bar (Doc Scanner Images 1, 2, 3, 5)
+  bottomControlsBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 18,
+    backgroundColor: '#000000',
   },
-  batchCountLabel: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  batchDoneHeaderBtn: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: borderRadius.pill,
-  },
-  batchDoneHeaderText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  batchThumbList: {
+  bottomLeftCol: {
     flexDirection: 'row',
+    alignItems: 'center',
+    width: 90,
   },
-  batchThumbCard: {
-    width: 58,
-    height: 72,
-    borderRadius: 8,
+  lastThumbContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 6,
     overflow: 'hidden',
     position: 'relative',
-    marginRight: 10,
     borderWidth: 1.5,
-    borderColor: colors.primary,
+    borderColor: '#00A3FF',
+    marginRight: 10,
   },
-  batchThumbImg: {
+  lastThumbImg: {
     width: '100%',
     height: '100%',
   },
-  batchThumbBadge: {
-    position: 'absolute',
-    top: 2,
-    left: 2,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    borderRadius: 4,
-  },
-  batchThumbIndex: {
-    color: '#FFFFFF',
-    fontSize: 9,
-    fontWeight: '700',
-  },
-  batchDeleteBtn: {
+  thumbPageBadge: {
     position: 'absolute',
     top: 2,
     right: 2,
-    backgroundColor: '#EF4444',
+    backgroundColor: '#00A3FF',
     width: 16,
     height: 16,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  batchDeleteText: {
+  thumbPageBadgeText: {
     color: '#FFFFFF',
-    fontSize: 9,
+    fontSize: 10,
     fontWeight: 'bold',
   },
-  bottomControls: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
+  autoManualBtn: {
     alignItems: 'center',
-    paddingVertical: 24,
-    paddingHorizontal: 30,
-    backgroundColor: '#0F0F18',
+    justifyContent: 'center',
   },
-  auxButton: {
+  autoManualIcon: {
+    fontSize: 20,
+    marginBottom: 2,
+  },
+  autoManualLabel: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  // Big Blue Shutter Button (Doc Scanner Images 1, 2, 3, 5)
+  shutterOuterCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(0, 163, 255, 0.25)',
+    borderWidth: 2,
+    borderColor: '#00A3FF',
     alignItems: 'center',
-    width: 60,
+    justifyContent: 'center',
   },
-  auxIcon: {
+  shutterInnerCircle: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: '#00A3FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#00A3FF',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  shutterCameraIcon: {
+    fontSize: 26,
+  },
+  bottomRightCol: {
+    width: 90,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  doneCheckBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#00A3FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#00A3FF',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+    elevation: 6,
+  },
+  doneCheckIcon: {
+    color: '#FFFFFF',
     fontSize: 22,
-    marginBottom: 4,
+    fontWeight: 'bold',
   },
-  auxLabel: {
+  galleryBtn: {
+    alignItems: 'center',
+  },
+  galleryIcon: {
+    fontSize: 22,
+    marginBottom: 2,
+  },
+  galleryLabel: {
     color: '#9CA3AF',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '500',
   },
-  shutterOuter: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    borderWidth: 4,
-    borderColor: '#FFFFFF',
-    alignItems: 'center',
+  // Settings Modal
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
   },
-  shutterInner: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#FFFFFF',
+  settingsModalCard: {
+    width: '100%',
+    backgroundColor: '#1E1E28',
+    borderRadius: 14,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  settingsModalTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 16,
+  },
+  settingsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2D3748',
+  },
+  settingsRowTitle: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  settingsRowSub: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  settingsToggleBox: {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: '#00A3FF',
     alignItems: 'center',
     justifyContent: 'center',
+    marginLeft: 12,
+  },
+  settingsToggleActive: {
+    backgroundColor: '#00A3FF',
+  },
+  settingsCloseBtn: {
+    backgroundColor: '#00A3FF',
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 18,
+  },
+  settingsCloseBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

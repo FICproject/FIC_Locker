@@ -16,4 +16,10 @@ class InAppCameraViewManager : SimpleViewManager<InAppCameraView>() {
     fun setTorchOn(view: InAppCameraView, torchOn: Boolean) {
         view.setTorch(torchOn)
     }
+
+    override fun getExportedCustomDirectEventTypeConstants(): MutableMap<String, Any>? {
+        val map = super.getExportedCustomDirectEventTypeConstants() ?: mutableMapOf()
+        map["onDocumentDetected"] = mapOf("registrationName" to "onDocumentDetected")
+        return map
+    }
 }

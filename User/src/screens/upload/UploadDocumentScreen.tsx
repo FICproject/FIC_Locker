@@ -30,6 +30,8 @@ export const UploadDocumentScreen: React.FC<{ navigation: any; route: any }> = (
   const rotationDeg = route.params?.rotationDeg || 0;
   const ocrTextFromRoute = route.params?.ocrText || '';
   const allPagesFromRoute = route.params?.allPages || [];
+  const paperSizeFromRoute = route.params?.paperSize || 'A4';
+  const paperDimensionsFromRoute = route.params?.paperDimensions || '210 × 297 mm';
   const [docName, setDocName] = useState(prefillName || 'Document_' + Date.now() + '.jpg');
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(prefillUri || null);
   const [description, setDescription] = useState('');
@@ -42,7 +44,7 @@ export const UploadDocumentScreen: React.FC<{ navigation: any; route: any }> = (
       color: c.color,
     }))
   );
-  const [tags, setTags] = useState('scanned, document');
+  const [tags, setTags] = useState(`scanned, ${paperSizeFromRoute}, document`);
   const [expiryDate, setExpiryDate] = useState('2027-12-31');
 
   useEffect(() => {

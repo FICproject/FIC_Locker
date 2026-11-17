@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,9 @@ import {
   ScrollView,
   Dimensions,
   Platform,
+  TextInput,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, typography, borderRadius, shadows } from '../../theme';
 import { OcrViewerModal } from '../../components/modals/OcrViewerModal';
@@ -18,11 +20,17 @@ import { PdfToolsModal } from '../../components/modals/PdfToolsModal';
 import { CornerAdjustmentModal, DocumentCorners } from '../../components/scanner/CornerAdjustmentModal';
 import { pdfService, PdfPageItem, PdfExportOptions } from '../../services/pdfService';
 import { shareService } from '../../services/shareService';
+import { documentService } from '../../services/api/documentService';
+import {
+  PaperSize,
+  PAPER_SPECS,
+  documentAnalysisService,
+} from '../../services/documentAnalysisService';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 type FilterType = 'normal' | 'magic' | 'bw' | 'grayscale' | 'sepia';
-type CropPreset = 'full' | 'a4' | 'idcard' | 'square';
+type CropPreset = 'full' | 'a4' | 'a3' | 'a5' | 'letter' | 'idcard' | 'square';
 
 export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
   navigation,
@@ -30,24 +38,93 @@ export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const pageUri = route.params?.pageUri;
-  const initialPagesFromRoute: PdfPageItem[] = route.params?.allPages || [
-    { id: 'p_1', uri: pageUri, rotationDeg: 0 },
-  ];
+  const initialPagesFromRoute: PdfPageItem[] = (route.params?.allPages && route.params.allPages.length > 0)
+    ? route.params.allPages.map((p: any, idx: number) => ({
+        id: p.id || `p_${idx + 1}`,
+        uri: p.uri || p.originalUri || pageUri,
+        rotationDeg: p.rotationDeg || 0,
+        filterMode: p.filterMode,
+        aspectRatio: p.aspectRatio,
+        paperSize: p.paperSize,
+        paperDimensions: p.paperDimensions,
+      }))
+    : pageUri
+    ? [{ id: 'p_1', uri: pageUri, rotationDeg: 0 }]
+    : [];
+
+  // Paper Size & Dimensions from Auto-Analysis
+  const [currentPaperSize, setCurrentPaperSize] = useState<PaperSize>(
+    (route.params?.paperSize as PaperSize) || 'A4'
+  );
 
   // Active Tool Panel
   const [activeTab, setActiveTab] = useState<'none' | 'crop' | 'filter' | 'adjust'>('none');
 
-  // Multi-page state
+  // Multi-page state & scroll reference
   const [pages, setPages] = useState<PdfPageItem[]>(initialPagesFromRoute);
+  const [currentPageIndex, setCurrentPageIndex] = useState<number>(0);
+  const scrollRef = useRef<ScrollView>(null);
 
-  // Tool 1: Rotation (0, 90, 180, 270)
+  // Synchronize pages if route params update
+  useEffect(() => {
+    if (route.params?.allPages && route.params.allPages.length > 0) {
+      setPages(
+        route.params.allPages.map((p: any, idx: number) => ({
+          id: p.id || `p_${idx + 1}`,
+          uri: p.uri || p.originalUri || pageUri,
+          rotationDeg: p.rotationDeg || 0,
+          filterMode: p.filterMode,
+          aspectRatio: p.aspectRatio,
+          paperSize: p.paperSize,
+          paperDimensions: p.paperDimensions,
+        }))
+      );
+    }
+  }, [route.params?.allPages, pageUri]);
+
+  // Navigate to specific page in horizontal scroll view
+  const goToPage = (index: number) => {
+    if (index >= 0 && index < pages.length) {
+      scrollRef.current?.scrollTo({ x: index * SCREEN_WIDTH, animated: true });
+      setCurrentPageIndex(index);
+    }
+  };
+
+  // Track page index on momentum scroll end
+  const handleScrollEnd = (e: any) => {
+    const offsetX = e.nativeEvent?.contentOffset?.x || 0;
+    const index = Math.round(offsetX / SCREEN_WIDTH);
+    if (index >= 0 && index < pages.length && index !== currentPageIndex) {
+      setCurrentPageIndex(index);
+    }
+  };
+
+  // Tool 1: Rotation for currently active page
   const [rotationDeg, setRotationDeg] = useState<number>(0);
+
+  const handleRotateCurrentPage = () => {
+    setPages((prev) => {
+      const updated = [...prev];
+      if (updated[currentPageIndex]) {
+        const curRot = (updated[currentPageIndex].rotationDeg || 0) + 90;
+        updated[currentPageIndex] = {
+          ...updated[currentPageIndex],
+          rotationDeg: curRot % 360,
+        };
+      }
+      return updated;
+    });
+  };
+
+  const handleRotate = () => {
+    handleRotateCurrentPage();
+  };
 
   // Tool 2: Filter Mode
   const [filterMode, setFilterMode] = useState<FilterType>('magic');
 
   // Tool 3: Crop Preset
-  const [cropPreset, setCropPreset] = useState<CropPreset>('full');
+  const [cropPreset, setCropPreset] = useState<CropPreset>('a4');
   const [isCropActive, setIsCropActive] = useState<boolean>(false);
 
   // Tool 4: Adjustments (Brightness: -50 to +50, Contrast: 1 to 4)
@@ -59,15 +136,127 @@ export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
   const [pdfToolsVisible, setPdfToolsVisible] = useState<boolean>(false);
   const [cornerModalVisible, setCornerModalVisible] = useState<boolean>(false);
   const [extractedOcrText, setExtractedOcrText] = useState<string>('');
+  const [docTitle, setDocTitle] = useState<string>(
+    'DocScanner_' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '_' + Date.now().toString().slice(-4)
+  );
 
-  // Rotation handler
-  const handleRotate = () => {
-    setRotationDeg((prev) => (prev + 90) % 360);
+  // Doc Scanner Image 6: Open PDF
+  const handleOpenPdf = async () => {
+    try {
+      const result = await pdfService.createPdfFromPages(pages, {
+        title: docTitle,
+        pageSize: currentPaperSize,
+      });
+      if (result.fileUri) {
+        Alert.alert(
+          'PDF Document Ready',
+          `"${docTitle}.pdf" (${Math.round(result.fileSizeBytes / 1024)} KB, ${pages.length} pages).`,
+          [
+            {
+              text: 'View PDF Tools',
+              onPress: () => setPdfToolsVisible(true),
+            },
+            {
+              text: 'Share PDF',
+              onPress: () =>
+                shareService.shareDocumentFile(
+                  result.fileUri!,
+                  'application/pdf',
+                  `${docTitle}.pdf`
+                ),
+            },
+            { text: 'OK' },
+          ]
+        );
+      }
+    } catch (e: any) {
+      Alert.alert('PDF Error', e.message || 'Failed to generate PDF.');
+    }
+  };
+
+  // Doc Scanner Image 6: Share Document File (Real Attached PDF)
+  const handleShareDoc = async () => {
+    try {
+      const result = await pdfService.createPdfFromPages(pages, {
+        title: docTitle,
+        pageSize: currentPaperSize,
+      });
+      const fileToShare = result.fileUri || pages[0]?.uri;
+      if (fileToShare) {
+        await shareService.shareDocumentFile(
+          fileToShare,
+          result.fileUri ? 'application/pdf' : 'image/jpeg',
+          `${docTitle}.pdf`
+        );
+      }
+    } catch (e: any) {
+      Alert.alert('Share Error', e.message || 'Failed to share document.');
+    }
+  };
+
+  // Doc Scanner Image 6: Save to My Documents
+  const handleSaveToMyDocs = async () => {
+    try {
+      const result = await pdfService.createPdfFromPages(pages, {
+        title: docTitle,
+        pageSize: currentPaperSize,
+      });
+
+      const newOfflineDoc = {
+        _id: `doc_scan_${Date.now()}`,
+        userId: 'usr_default',
+        name: `${docTitle}.pdf`,
+        originalFileName: `${docTitle}.pdf`,
+        fileType: 'pdf',
+        mimeType: 'application/pdf',
+        fileSizeBytes: result.fileSizeBytes,
+        storageKey: result.fileUri || 'offline_pdf',
+        category: 'Personal Documents',
+        tags: ['scanned', currentPaperSize.toLowerCase(), 'doc_scanner'],
+        status: 'available',
+        localUri: result.fileUri || pages[0]?.uri,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const existingRaw = await AsyncStorage.getItem('@fic_locker_offline_docs');
+      const existingDocs = existingRaw ? JSON.parse(existingRaw) : [];
+      existingDocs.unshift(newOfflineDoc);
+      await AsyncStorage.setItem('@fic_locker_offline_docs', JSON.stringify(existingDocs));
+
+      try {
+        await documentService.syncOfflineDocuments();
+      } catch (err) {}
+
+      Alert.alert(
+        'Document Saved',
+        `"${docTitle}.pdf" (${pages.length} page${pages.length > 1 ? 's' : ''}) has been saved to My Documents.`,
+        [
+          {
+            text: '📁 View in My Docs',
+            onPress: () => {
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'MainTabs' }],
+              });
+            },
+          },
+          { text: 'Done' },
+        ]
+      );
+    } catch (e: any) {
+      Alert.alert('Save Error', e.message || 'Failed to save document.');
+    }
   };
 
   // Crop Preset handler
   const handleSelectCrop = (preset: CropPreset) => {
     setCropPreset(preset);
+    if (preset === 'a4') setCurrentPaperSize('A4');
+    else if (preset === 'a3') setCurrentPaperSize('A3');
+    else if (preset === 'a5') setCurrentPaperSize('A5');
+    else if (preset === 'letter') setCurrentPaperSize('Letter');
+    else if (preset === 'idcard') setCurrentPaperSize('ID');
   };
 
   const handleApplyCrop = () => {
@@ -76,7 +265,7 @@ export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
   };
 
   const handleCancelCrop = () => {
-    setCropPreset('full');
+    setCropPreset('a4');
     setIsCropActive(false);
     setActiveTab('none');
   };
@@ -92,12 +281,14 @@ export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
     navigation.navigate('UploadDocument', {
       prefillName: 'Scanned_Doc_' + Date.now() + (pages.length > 1 ? '.pdf' : '.jpg'),
       pageUri: pages[0]?.uri || pageUri,
-      allPages: pages,
+      allPages: pages.map((p) => ({ ...p, paperSize: currentPaperSize })),
       rotationDeg,
       filterMode,
       brightness,
       contrastLevel,
       cropPreset,
+      paperSize: currentPaperSize,
+      paperDimensions: PAPER_SPECS[currentPaperSize]?.dimensions || '210 × 297 mm',
       ocrText: extractedOcrText,
     });
   };
@@ -182,6 +373,12 @@ export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
     switch (cropPreset) {
       case 'a4':
         return { paddingHorizontal: 16, paddingVertical: 24, borderRadius: 12 };
+      case 'a3':
+        return { paddingHorizontal: 12, paddingVertical: 32, borderRadius: 10 };
+      case 'a5':
+        return { paddingHorizontal: 22, paddingVertical: 18, borderRadius: 12 };
+      case 'letter':
+        return { paddingHorizontal: 18, paddingVertical: 22, borderRadius: 12 };
       case 'idcard':
         return { paddingHorizontal: 28, paddingVertical: 48, borderRadius: 16 };
       case 'square':
@@ -256,120 +453,198 @@ export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
           <Text style={styles.title}>Edit Document</Text>
           {pages.length > 1 && (
             <View style={styles.pageCountBadge}>
-              <Text style={styles.pageCountBadgeText}>{pages.length} Pages</Text>
+              <Text style={styles.pageCountBadgeText}>
+                Page {currentPageIndex + 1} of {pages.length}
+              </Text>
             </View>
           )}
-          {rotationDeg !== 0 && (
+          {(pages[currentPageIndex]?.rotationDeg || 0) !== 0 && (
             <View style={styles.rotationBadge}>
-              <Text style={styles.rotationBadgeText}>{rotationDeg}°</Text>
+              <Text style={styles.rotationBadgeText}>{pages[currentPageIndex].rotationDeg}°</Text>
             </View>
           )}
         </View>
-        <TouchableOpacity onPress={handleDone} style={styles.iconBtn}>
-          <Text style={[styles.iconBtnText, { color: colors.primary }]}>✓</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Quick Action Bar (OCR, PDF Tools, Manual Quad) */}
-      <View style={styles.quickBar}>
-        <TouchableOpacity
-          style={styles.quickBarBtn}
-          onPress={() => setOcrModalVisible(true)}
-        >
-          <Text style={styles.quickBarIcon}>📄</Text>
-          <Text style={styles.quickBarLabel}>
-            {extractedOcrText ? '✓ OCR Active' : 'Extract Text (OCR)'}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.quickBarBtn}
-          onPress={() => setPdfToolsVisible(true)}
-        >
-          <Text style={styles.quickBarIcon}>📚</Text>
-          <Text style={styles.quickBarLabel}>PDF Tools ({pages.length})</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.quickBarBtn}
-          onPress={() => setCornerModalVisible(true)}
-        >
-          <Text style={styles.quickBarIcon}>📐</Text>
-          <Text style={styles.quickBarLabel}>Corner Quad</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Canvas Viewport */}
-      <View style={styles.canvasContainer}>
-        <View style={[styles.cropWrapper, getCropStyle()]}>
-          <View
-            style={[
-              styles.imageContainer,
-              {
-                transform: [
-                  { rotate: `${rotationDeg}deg` },
-                  { scale: isSideways ? 0.75 : 1.0 },
-                ],
-              },
-            ]}
+        <View style={styles.headerRightActions}>
+          <TouchableOpacity
+            onPress={handleRotateCurrentPage}
+            style={styles.headerRotateBtn}
+            activeOpacity={0.7}
           >
-            {pageUri ? (
-              <Image
-                source={{ uri: pageUri }}
-                style={styles.capturedImage}
-                resizeMode="contain"
-              />
-            ) : (
-              <View style={styles.placeholderSheet}>
-                <Text style={styles.placeholderText}>📄 Document Preview</Text>
-              </View>
-            )}
-
-            {/* Live Filter Tint Layer */}
-            {getFilterOverlay() && (
-              <View
-                style={[StyleSheet.absoluteFillObject, getFilterOverlay(), styles.overlayLayer]}
-                pointerEvents="none"
-              />
-            )}
-
-            {/* Live Brightness Layer */}
-            {getBrightnessOverlay() && (
-              <View
-                style={[StyleSheet.absoluteFillObject, getBrightnessOverlay()]}
-                pointerEvents="none"
-              />
-            )}
-
-            {/* Contrast Accent Layer */}
-            {contrastLevel > 1 && (
-              <View
-                style={[
-                  StyleSheet.absoluteFillObject,
-                  {
-                    backgroundColor: `rgba(0, 0, 0, ${(contrastLevel - 1) * 0.08})`,
-                  },
-                ]}
-                pointerEvents="none"
-              />
-            )}
-          </View>
-
-          {/* Interactive Crop Border & Grid Overlay */}
-          {isCropActive && (
-            <View style={styles.cropOverlay} pointerEvents="none">
-              <View style={[styles.cropCorner, styles.cTopLeft]} />
-              <View style={[styles.cropCorner, styles.cTopRight]} />
-              <View style={[styles.cropCorner, styles.cBottomLeft]} />
-              <View style={[styles.cropCorner, styles.cBottomRight]} />
-
-              <View style={styles.gridLineH1} />
-              <View style={styles.gridLineH2} />
-              <View style={styles.gridLineV1} />
-              <View style={styles.gridLineV2} />
-            </View>
-          )}
+            <Text style={styles.headerRotateIcon}>🔄</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleDone} style={styles.iconBtn}>
+            <Text style={[styles.iconBtnText, { color: colors.primary }]}>✓</Text>
+          </TouchableOpacity>
         </View>
+      </View>
+
+      {/* Canvas Viewport with Horizontal Paged Scroll */}
+      <View style={styles.canvasContainer}>
+        {pages.length === 0 ? (
+          <View style={styles.placeholderSheet}>
+            <Text style={styles.placeholderText}>📄 No document preview</Text>
+          </View>
+        ) : (
+          <ScrollView
+            ref={scrollRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            nestedScrollEnabled
+            decelerationRate="fast"
+            style={styles.pageScrollView}
+            contentContainerStyle={styles.pageScrollContent}
+            onMomentumScrollEnd={handleScrollEnd}
+            scrollEventThrottle={16}
+          >
+            {pages.map((page, index) => {
+              const pageRotation = page.rotationDeg || 0;
+              const isSideways = pageRotation === 90 || pageRotation === 270;
+              return (
+                <View
+                  key={page.id || `page_${index}`}
+                  style={[styles.pageSlide, { width: SCREEN_WIDTH }]}
+                >
+                  <View style={[styles.cropWrapper, getCropStyle()]}>
+                    <View
+                      style={[
+                        styles.imageContainer,
+                        {
+                          transform: [
+                            { rotate: `${pageRotation}deg` },
+                            { scale: isSideways ? 0.75 : 1.0 },
+                          ],
+                        },
+                      ]}
+                    >
+                      {page.uri ? (
+                        <Image
+                          source={{ uri: page.uri }}
+                          style={styles.capturedImage}
+                          resizeMode="contain"
+                        />
+                      ) : (
+                        <View style={styles.placeholderSheet}>
+                          <Text style={styles.placeholderText}>📄 Page {index + 1}</Text>
+                        </View>
+                      )}
+
+                      {/* Live Filter Tint Layer */}
+                      {getFilterOverlay() && (
+                        <View
+                          style={[
+                            StyleSheet.absoluteFillObject,
+                            getFilterOverlay(),
+                            styles.overlayLayer,
+                          ]}
+                          pointerEvents="none"
+                        />
+                      )}
+
+                      {/* Live Brightness Layer */}
+                      {getBrightnessOverlay() && (
+                        <View
+                          style={[StyleSheet.absoluteFillObject, getBrightnessOverlay()]}
+                          pointerEvents="none"
+                        />
+                      )}
+
+                      {/* Contrast Accent Layer */}
+                      {contrastLevel > 1 && (
+                        <View
+                          style={[
+                            StyleSheet.absoluteFillObject,
+                            {
+                              backgroundColor: `rgba(0, 0, 0, ${(contrastLevel - 1) * 0.08})`,
+                            },
+                          ]}
+                          pointerEvents="none"
+                        />
+                      )}
+                    </View>
+
+                    {/* Interactive Crop Border & Grid Overlay */}
+                    {isCropActive && currentPageIndex === index && (
+                      <View style={styles.cropOverlay} pointerEvents="none">
+                        <View style={[styles.cropCorner, styles.cTopLeft]} />
+                        <View style={[styles.cropCorner, styles.cTopRight]} />
+                        <View style={[styles.cropCorner, styles.cBottomLeft]} />
+                        <View style={[styles.cropCorner, styles.cBottomRight]} />
+
+                        <View style={styles.gridLineH1} />
+                        <View style={styles.gridLineH2} />
+                        <View style={styles.gridLineV1} />
+                        <View style={styles.gridLineV2} />
+                      </View>
+                    )}
+                  </View>
+                </View>
+              );
+            })}
+          </ScrollView>
+        )}
+
+        {/* Floating Pagination Strip for multi-page documents */}
+        {pages.length > 1 && (
+          <View style={styles.paginationStrip}>
+            <TouchableOpacity
+              style={[
+                styles.arrowBtn,
+                currentPageIndex === 0 && styles.arrowBtnDisabled,
+              ]}
+              onPress={() => goToPage(currentPageIndex - 1)}
+              disabled={currentPageIndex === 0}
+              activeOpacity={0.7}
+            >
+              <Text
+                style={[
+                  styles.arrowBtnText,
+                  currentPageIndex === 0 && styles.arrowBtnTextDisabled,
+                ]}
+              >
+                ‹
+              </Text>
+            </TouchableOpacity>
+
+            <View style={styles.paginationCenter}>
+              <Text style={styles.paginationPageText}>
+                Page {currentPageIndex + 1} of {pages.length}
+              </Text>
+              <View style={styles.dotsRow}>
+                {pages.map((_, idx) => (
+                  <TouchableOpacity
+                    key={idx}
+                    onPress={() => goToPage(idx)}
+                    hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                    style={[
+                      styles.dot,
+                      idx === currentPageIndex ? styles.dotActive : styles.dotInactive,
+                    ]}
+                  />
+                ))}
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.arrowBtn,
+                currentPageIndex === pages.length - 1 && styles.arrowBtnDisabled,
+              ]}
+              onPress={() => goToPage(currentPageIndex + 1)}
+              disabled={currentPageIndex === pages.length - 1}
+              activeOpacity={0.7}
+            >
+              <Text
+                style={[
+                  styles.arrowBtnText,
+                  currentPageIndex === pages.length - 1 && styles.arrowBtnTextDisabled,
+                ]}
+              >
+                ›
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
 
       {/* Dynamic Sub-Panel for Selected Tool */}
@@ -381,8 +656,8 @@ export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
           </View>
-          <View style={styles.presetsRow}>
-            {(['full', 'a4', 'idcard', 'square'] as CropPreset[]).map((preset) => (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.presetsScroll}>
+            {(['a4', 'a3', 'a5', 'letter', 'idcard', 'square', 'full'] as CropPreset[]).map((preset) => (
               <TouchableOpacity
                 key={preset}
                 style={[
@@ -400,14 +675,20 @@ export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
                   {preset === 'full'
                     ? 'Full Page'
                     : preset === 'a4'
-                    ? 'A4 Doc'
+                    ? 'A4 (210×297)'
+                    : preset === 'a3'
+                    ? 'A3 (297×420)'
+                    : preset === 'a5'
+                    ? 'A5 (148×210)'
+                    : preset === 'letter'
+                    ? 'US Letter'
                     : preset === 'idcard'
                     ? 'ID Card'
                     : '1:1 Square'}
                 </Text>
               </TouchableOpacity>
             ))}
-          </View>
+          </ScrollView>
           <TouchableOpacity style={styles.applyBtn} onPress={handleApplyCrop}>
             <Text style={styles.applyBtnText}>Apply Crop</Text>
           </TouchableOpacity>
@@ -517,74 +798,60 @@ export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
         </View>
       )}
 
-      {/* Bottom Main Tools Bar */}
-      <View style={styles.toolBar}>
-        {/* Tool 1: Rotate */}
-        <TouchableOpacity style={styles.toolItem} onPress={handleRotate} activeOpacity={0.7}>
-          <View style={[styles.toolIconWrap, rotationDeg !== 0 && styles.toolIconActive]}>
-            <Text style={styles.toolIcon}>🔄</Text>
-          </View>
-          <Text style={styles.toolLabel}>Rotate ({rotationDeg}°)</Text>
+      {/* Doc Scanner Image 6 Bottom Navigation Bar: Back | Edit | Edit All | Open PDF | Share | Save */}
+      <View style={[styles.docScannerBottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        {/* 1. Back */}
+        <TouchableOpacity style={styles.dsBarItem} onPress={() => navigation.goBack()} activeOpacity={0.7}>
+          <Text style={styles.dsBarIcon}>←</Text>
+          <Text style={styles.dsBarLabel}>Back</Text>
         </TouchableOpacity>
 
-        {/* Tool 2: Crop */}
+        {/* 2. Edit (Opens Crop & Border Adjustment Modal) */}
         <TouchableOpacity
-          style={styles.toolItem}
+          style={styles.dsBarItem}
+          onPress={() => setCornerModalVisible(true)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.dsBarIcon}>✏️</Text>
+          <Text style={styles.dsBarLabel}>Edit</Text>
+        </TouchableOpacity>
+
+        {/* 3. Edit All (Filters / Enhancements for all pages) */}
+        <TouchableOpacity
+          style={styles.dsBarItem}
           onPress={() => {
-            const next = activeTab === 'crop' ? 'none' : 'crop';
+            const next = activeTab === 'filter' ? 'none' : 'filter';
             setActiveTab(next);
-            setIsCropActive(next === 'crop');
           }}
           activeOpacity={0.7}
         >
-          <View style={[styles.toolIconWrap, activeTab === 'crop' && styles.toolIconActive]}>
-            <Text style={styles.toolIcon}>📐</Text>
-          </View>
-          <Text style={[styles.toolLabel, activeTab === 'crop' && styles.labelActive]}>
-            Crop
-          </Text>
+          <Text style={styles.dsBarIcon}>📄</Text>
+          <Text style={styles.dsBarLabel}>Edit All</Text>
         </TouchableOpacity>
 
-        {/* Tool 3: Filter */}
-        <TouchableOpacity
-          style={styles.toolItem}
-          onPress={() => setActiveTab(activeTab === 'filter' ? 'none' : 'filter')}
-          activeOpacity={0.7}
-        >
-          <View style={[styles.toolIconWrap, activeTab === 'filter' && styles.toolIconActive]}>
-            <Text style={styles.toolIcon}>🎨</Text>
-          </View>
-          <Text style={[styles.toolLabel, activeTab === 'filter' && styles.labelActive]}>
-            Filter: {filterMode === 'normal' ? 'Normal' : filterMode.toUpperCase()}
-          </Text>
+        {/* 4. Open PDF */}
+        <TouchableOpacity style={styles.dsBarItem} onPress={handleOpenPdf} activeOpacity={0.7}>
+          <Text style={styles.dsBarIcon}>📑</Text>
+          <Text style={styles.dsBarLabel}>Open PDF</Text>
         </TouchableOpacity>
 
-        {/* Tool 4: Adjust */}
-        <TouchableOpacity
-          style={styles.toolItem}
-          onPress={() => setActiveTab(activeTab === 'adjust' ? 'none' : 'adjust')}
-          activeOpacity={0.7}
-        >
-          <View style={[styles.toolIconWrap, activeTab === 'adjust' && styles.toolIconActive]}>
-            <Text style={styles.toolIcon}>⚙️</Text>
-          </View>
-          <Text style={[styles.toolLabel, activeTab === 'adjust' && styles.labelActive]}>
-            Adjust
-          </Text>
+        {/* 5. Share (Attaches Real PDF Document File) */}
+        <TouchableOpacity style={styles.dsBarItem} onPress={handleShareDoc} activeOpacity={0.7}>
+          <Text style={styles.dsBarIcon}>🔗</Text>
+          <Text style={styles.dsBarLabel}>Share</Text>
         </TouchableOpacity>
-      </View>
 
-      {/* Done Action Button */}
-      <View style={[styles.bottomAction, { paddingBottom: Math.max(insets.bottom, 14) }]}>
-        <TouchableOpacity style={styles.doneBtn} onPress={handleDone} activeOpacity={0.85}>
-          <Text style={styles.doneBtnText}>Save & Proceed</Text>
+        {/* 6. Save (Saves directly to My Documents) */}
+        <TouchableOpacity style={styles.dsBarItem} onPress={handleSaveToMyDocs} activeOpacity={0.7}>
+          <Text style={styles.dsBarIcon}>💾</Text>
+          <Text style={styles.dsBarLabel}>Save</Text>
         </TouchableOpacity>
       </View>
 
       {/* OCR Text Viewer Modal */}
       <OcrViewerModal
         visible={ocrModalVisible}
-        imageUri={pageUri}
+        imageUri={pages[currentPageIndex]?.uri || pageUri}
         documentTitle="Scanned Document"
         existingOcrText={extractedOcrText}
         onSaveOcrText={(txt) => setExtractedOcrText(txt)}
@@ -600,14 +867,29 @@ export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
         onClose={() => setPdfToolsVisible(false)}
       />
 
-      {/* Corner Quad Modal */}
-      {pageUri ? (
+      {/* Corner Quad Modal (Doc Scanner Image 4) */}
+      {pages[currentPageIndex]?.uri || pageUri ? (
         <CornerAdjustmentModal
           visible={cornerModalVisible}
-          imageUri={pageUri}
-          onApply={(corners) => {
+          imageUri={pages[currentPageIndex]?.uri || pageUri}
+          documentTitle={docTitle}
+          onApply={(corners, paperSize, croppedUri, filterName, newDocName) => {
             setCornerModalVisible(false);
-            Alert.alert('Perspective Corrected', 'Document corners and planar geometry aligned.');
+            if (newDocName) setDocTitle(newDocName);
+            if (paperSize) {
+              setCurrentPaperSize(paperSize);
+              setCropPreset(paperSize.toLowerCase() as CropPreset);
+            }
+            if (croppedUri) {
+              setPages((prev) => {
+                const updated = [...prev];
+                updated[currentPageIndex] = {
+                  ...updated[currentPageIndex],
+                  uri: croppedUri,
+                };
+                return updated;
+              });
+            }
           }}
           onCancel={() => setCornerModalVisible(false)}
         />
@@ -698,11 +980,147 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.primary,
   },
+  paperBadgeBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F3E8FF',
+    marginHorizontal: 16,
+    marginTop: 6,
+    marginBottom: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: '#E9D5FF',
+  },
+  paperBadgeTag: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginRight: 8,
+  },
+  paperBadgeTagText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  paperBadgeTitle: {
+    flex: 1,
+    fontSize: 12,
+    color: '#6B21A8',
+    fontWeight: '600',
+  },
+  paperSwitchBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 6,
+  },
+  paperSwitchBtnText: {
+    fontSize: 11,
+    color: colors.primary,
+    fontWeight: '700',
+  },
+  headerRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  headerRotateBtn: {
+    padding: 8,
+  },
+  headerRotateIcon: {
+    fontSize: 18,
+  },
+  presetsScroll: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
   canvasContainer: {
     flex: 1,
+    position: 'relative',
+    backgroundColor: '#F8F9FE',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pageScrollView: {
+    flex: 1,
+    width: SCREEN_WIDTH,
+  },
+  pageScrollContent: {
+    alignItems: 'center',
+  },
+  pageSlide: {
+    height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  paginationStrip: {
+    position: 'absolute',
+    bottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.78)',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 4,
+    gap: 12,
+  },
+  paginationCenter: {
+    alignItems: 'center',
+  },
+  paginationPageText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  dotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+  },
+  dot: {
+    height: 6,
+    borderRadius: 3,
+  },
+  dotActive: {
+    width: 16,
+    backgroundColor: colors.primary || '#6366F1',
+  },
+  dotInactive: {
+    width: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.4)',
+  },
+  arrowBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  arrowBtnDisabled: {
+    opacity: 0.25,
+  },
+  arrowBtnText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+    marginTop: -2,
+  },
+  arrowBtnTextDisabled: {
+    color: 'rgba(255, 255, 255, 0.3)',
   },
   cropWrapper: {
     width: '100%',
@@ -1012,5 +1430,37 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: typography.fontWeights.bold,
+  },
+  // Doc Scanner Image 6 Bottom Navigation Bar
+  docScannerBottomBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+  },
+  dsBarItem: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    minWidth: 54,
+  },
+  dsBarIcon: {
+    fontSize: 22,
+    color: '#374151',
+    marginBottom: 3,
+  },
+  dsBarLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#4B5563',
   },
 });
