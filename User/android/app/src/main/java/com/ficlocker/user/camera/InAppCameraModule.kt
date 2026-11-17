@@ -909,46 +909,73 @@ class InAppCameraModule(reactContext: ReactApplicationContext) :
     }
 
     /**
-     * Shares a document file (PDF, Image, etc.) directly through Android's native share sheet
+     * Shares a document file (PDF, Image, etc.) directly through Android's native share sheet as a real attachment
      */
     @ReactMethod
     fun shareFile(fileUri: String, mimeType: String, title: String, promise: Promise) {
-        try {
-            val uri = Uri.parse(fileUri)
-            val file = if (uri.scheme == "file") {
-                File(uri.path ?: "")
-            } else {
-                File(fileUri)
-            }
+        Thread {
+            try {
+                val uri = Uri.parse(fileUri)
+                val file: File = when (uri.scheme) {
+                    "file" -> File(uri.path ?: "")
+                    "content" -> {
+                        val ext = if (mimeType.contains("pdf", ignoreCase = true) || title.endsWith(".pdf", ignoreCase = true)) "pdf" else "jpg"
+                        val cached = File(reactApplicationContext.cacheDir, "shared_${System.currentTimeMillis()}.$ext")
+                        reactApplicationContext.contentResolver.openInputStream(uri)?.use { input ->
+                            FileOutputStream(cached).use { output -> input.copyTo(output) }
+                        }
+                        cached
+                    }
+                    "http", "https" -> {
+                        val ext = if (mimeType.contains("pdf", ignoreCase = true) || title.endsWith(".pdf", ignoreCase = true)) "pdf" else "jpg"
+                        val cached = File(reactApplicationContext.cacheDir, "shared_${System.currentTimeMillis()}.$ext")
+                        java.net.URL(fileUri).openStream().use { input ->
+                            FileOutputStream(cached).use { output -> input.copyTo(output) }
+                        }
+                        cached
+                    }
+                    else -> {
+                        val f = File(fileUri)
+                        if (f.exists()) f else File(uri.path ?: fileUri)
+                    }
+                }
 
-            if (!file.exists()) {
-                promise.reject("FILE_NOT_FOUND", "File does not exist: $fileUri")
-                return
-            }
+                if (!file.exists() || file.length() == 0L) {
+                    promise.reject("FILE_NOT_FOUND", "File does not exist: $fileUri")
+                    return@Thread
+                }
 
-            val contentUri: Uri = androidx.core.content.FileProvider.getUriForFile(
-                reactApplicationContext,
-                "${reactApplicationContext.packageName}.provider",
-                file
-            )
+                val contentUri: Uri = androidx.core.content.FileProvider.getUriForFile(
+                    reactApplicationContext,
+                    "${reactApplicationContext.packageName}.provider",
+                    file
+                )
 
-            val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                type = if (mimeType.isNotEmpty()) mimeType else "application/pdf"
-                putExtra(android.content.Intent.EXTRA_STREAM, contentUri)
-                putExtra(android.content.Intent.EXTRA_SUBJECT, title)
-                putExtra(android.content.Intent.EXTRA_TEXT, "Sharing \"$title\" from FIC Locker.")
-                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
+                val effectiveMime = if (mimeType.isNotEmpty()) mimeType else {
+                    if (file.name.endsWith(".pdf", ignoreCase = true) || title.endsWith(".pdf", ignoreCase = true)) {
+                        "application/pdf"
+                    } else {
+                        "image/jpeg"
+                    }
+                }
 
-            val chooser = android.content.Intent.createChooser(shareIntent, "Share $title").apply {
-                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                    type = effectiveMime
+                    putExtra(android.content.Intent.EXTRA_STREAM, contentUri)
+                    putExtra(android.content.Intent.EXTRA_SUBJECT, title)
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+
+                val chooser = android.content.Intent.createChooser(shareIntent, "Share $title").apply {
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                reactApplicationContext.startActivity(chooser)
+                promise.resolve(true)
+            } catch (e: Exception) {
+                promise.reject("SHARE_FAILED", e.message ?: "Failed to share file")
             }
-            reactApplicationContext.startActivity(chooser)
-            promise.resolve(true)
-        } catch (e: Exception) {
-            promise.reject("SHARE_FAILED", e.message ?: "Failed to share file")
-        }
+        }.start()
     }
 
     /**

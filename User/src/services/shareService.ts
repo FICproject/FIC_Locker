@@ -1,52 +1,125 @@
 import { Share, Linking, Alert, Platform, NativeModules } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DocumentItem } from '../types';
+import { pdfService } from './pdfService';
 
 export const shareService = {
   /**
-   * Share document file (PDF or other document) via native OS Share Sheet (WhatsApp, Email, Drive, etc.).
+   * Share document file (PDF or Image) directly as an attached file via Android Share Sheet.
+   * Guarantees that documents are shared as actual physical files (.pdf, .jpg), NEVER as plain text.
    */
-  async shareDocument(doc: DocumentItem, options?: { format?: 'pdf' | 'jpg'; password?: string }) {
+  async shareDocument(
+    doc: DocumentItem,
+    options?: { format?: 'pdf' | 'jpg'; password?: string }
+  ): Promise<boolean> {
     try {
-      const mime = doc.mimeType || (doc.fileType === 'pdf' ? 'application/pdf' : 'image/jpeg');
-
-      // 1. Try native file attachment share (Android FileProvider)
-      if (Platform.OS === 'android' && doc.localUri && NativeModules.InAppCameraModule?.shareFile) {
-        try {
-          const success = await NativeModules.InAppCameraModule.shareFile(
-            doc.localUri,
-            mime,
-            doc.name
+      // 1. Enrich document metadata from local offline cache if possible
+      let fullDoc: DocumentItem = { ...doc };
+      try {
+        const cachedRaw = await AsyncStorage.getItem('@fic_locker_offline_docs');
+        if (cachedRaw) {
+          const cachedList: DocumentItem[] = JSON.parse(cachedRaw);
+          const found = cachedList.find(
+            (d) =>
+              (doc._id && d._id === doc._id) ||
+              d.name === doc.name ||
+              d.originalFileName === doc.name ||
+              d.name === doc.originalFileName
           );
-          if (success) return true;
-        } catch (nativeErr) {
-          console.warn('[shareService] Native file share failed, falling back to Share.share:', nativeErr);
+          if (found) {
+            fullDoc = {
+              ...found,
+              ...fullDoc,
+              localUri: fullDoc.localUri || found.localUri,
+              thumbnailUrl: fullDoc.thumbnailUrl || found.thumbnailUrl,
+              pages: (fullDoc.pages && fullDoc.pages.length > 0) ? fullDoc.pages : found.pages,
+              downloadUrl: fullDoc.downloadUrl || found.downloadUrl,
+              pageCount: fullDoc.pageCount || found.pageCount,
+            };
+          }
+        }
+      } catch (cacheErr) {
+        console.warn('[shareService] Cache lookup error:', cacheErr);
+      }
+
+      const isPdf =
+        options?.format === 'pdf' ||
+        fullDoc.fileType === 'pdf' ||
+        (Boolean(fullDoc.name) && fullDoc.name.toLowerCase().endsWith('.pdf')) ||
+        Boolean(fullDoc.pages && fullDoc.pages.length > 0);
+
+      const rawTitle = (fullDoc.name || fullDoc.originalFileName || 'Document')
+        .replace(/\.[^/.]+$/, '')
+        .trim();
+      const cleanTitle = rawTitle || 'Document';
+
+      // 2. Handle PDF Document Sharing
+      if (isPdf) {
+        const pdfFileName = `${cleanTitle}.pdf`;
+
+        // A. If the document has scanned page images, ALWAYS convert to a fresh native PDF embedding the real photos
+        const pageUris: string[] = (fullDoc.pages && fullDoc.pages.length > 0)
+          ? fullDoc.pages.filter(Boolean)
+          : (fullDoc.localUri && !fullDoc.localUri.toLowerCase().endsWith('.pdf'))
+          ? [fullDoc.localUri]
+          : [];
+
+        if (pageUris.length > 0) {
+          try {
+            const pdfPages = pageUris.map((uri, idx) => ({
+              id: `p_${idx + 1}`,
+              uri,
+              rotationDeg: 0,
+            }));
+            const pdfRes = await pdfService.createPdfFromPages(pdfPages, {
+              title: cleanTitle,
+              password: options?.password,
+            });
+            if (pdfRes?.fileUri) {
+              const shared = await this.shareDocumentFile(pdfRes.fileUri, 'application/pdf', pdfFileName);
+              if (shared) return true;
+            }
+          } catch (pdfErr) {
+            console.warn('[shareService] Generating PDF from pages failed:', pdfErr);
+          }
+        }
+
+        // B. If a local .pdf file path already exists on device
+        if (fullDoc.localUri && fullDoc.localUri.toLowerCase().endsWith('.pdf')) {
+          const shared = await this.shareDocumentFile(fullDoc.localUri, 'application/pdf', pdfFileName);
+          if (shared) return true;
+        }
+
+        // C. If remote downloadUrl is available
+        if (fullDoc.downloadUrl) {
+          const shared = await this.shareDocumentFile(fullDoc.downloadUrl, 'application/pdf', pdfFileName);
+          if (shared) return true;
         }
       }
 
-      // 2. Fallback to standard React Native share dialog
-      const shareTitle = `FIC Locker Document: ${doc.name}`;
-      let shareMessage = `Sharing "${doc.name}" securely from FIC Locker.\nCategory: ${doc.category || 'General'}\nSize: ${Math.round((doc.fileSizeBytes || 1024) / 1024)} KB`;
+      // 3. Handle Image Document Sharing
+      const imageUri =
+        fullDoc.localUri ||
+        (fullDoc.pages && fullDoc.pages[0]) ||
+        fullDoc.thumbnailUrl ||
+        fullDoc.downloadUrl;
 
-      if (options?.password) {
-        shareMessage += `\nPassword Protection: Active (PIN required to open)`;
+      if (imageUri) {
+        const ext =
+          fullDoc.fileType === 'png' || (fullDoc.name && fullDoc.name.toLowerCase().endsWith('.png'))
+            ? 'png'
+            : 'jpg';
+        const mime = ext === 'png' ? 'image/png' : 'image/jpeg';
+        const imgFileName = `${cleanTitle}.${ext}`;
+        const shared = await this.shareDocumentFile(imageUri, mime, imgFileName);
+        if (shared) return true;
       }
 
-      if (doc.downloadUrl) {
-        shareMessage += `\nDownload Link: ${doc.downloadUrl}`;
-      }
-
-      const result = await Share.share(
-        {
-          title: shareTitle,
-          message: shareMessage,
-          url: doc.localUri || doc.thumbnailUrl || doc.downloadUrl,
-        },
-        {
-          dialogTitle: `Share ${doc.name}`,
-        }
+      Alert.alert(
+        'Share Document',
+        `Could not locate the document file for "${doc.name}". Please open the document to verify.`
       );
-
-      return result.action === Share.sharedAction;
+      return false;
     } catch (error: any) {
       console.warn('[shareService] Share failed:', error);
       Alert.alert('Share Failed', error.message || 'Unable to open share sheet.');
@@ -124,7 +197,6 @@ export const shareService = {
       const result = await Share.share(
         {
           title,
-          message: `Sharing ${title} from FIC Locker`,
           url: fileUri,
         },
         {
