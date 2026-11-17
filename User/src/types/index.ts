@@ -22,6 +22,8 @@ export interface AuthTokens {
 export interface AuthResponse {
   user: UserProfile;
   tokens: AuthTokens;
+  success?: boolean;
+  message?: string;
 }
 
 export type DocumentCategoryType = 

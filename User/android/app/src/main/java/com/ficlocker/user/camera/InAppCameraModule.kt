@@ -197,10 +197,14 @@ class InAppCameraModule(reactContext: ReactApplicationContext) :
     private fun loadOrientedBitmap(imageUri: String): Bitmap? {
         return try {
             val uri = Uri.parse(imageUri)
-            val stream: InputStream? = if (uri.scheme == "file") {
-                File(uri.path ?: "").inputStream()
-            } else {
-                reactApplicationContext.contentResolver.openInputStream(uri)
+            val stream: InputStream? = when (uri.scheme) {
+                "file" -> File(uri.path ?: "").inputStream()
+                "content" -> reactApplicationContext.contentResolver.openInputStream(uri)
+                "http", "https" -> java.net.URL(imageUri).openStream()
+                else -> {
+                    val f = File(imageUri)
+                    if (f.exists()) f.inputStream() else reactApplicationContext.contentResolver.openInputStream(uri)
+                }
             }
             val bytes = stream?.readBytes() ?: return null
             val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
@@ -1120,21 +1124,52 @@ class InAppCameraModule(reactContext: ReactApplicationContext) :
             try {
                 val doc = PdfDocument()
                 val cleanName = if (outputFileName.isNotEmpty()) {
-                    if (outputFileName.endsWith(".pdf")) outputFileName else "$outputFileName.pdf"
+                    val sanitized = outputFileName.replace(Regex("[^a-zA-Z0-9_.-]"), "_")
+                    if (sanitized.endsWith(".pdf", ignoreCase = true)) sanitized else "$sanitized.pdf"
                 } else {
-                    "Document_${System.currentTimeMillis()}.pdf"
+                    "FIC_Document_${System.currentTimeMillis()}.pdf"
                 }
                 val outFile = File(reactApplicationContext.cacheDir, cleanName)
 
+                // Page dimensions in standard PDF points (72 points = 1 inch)
+                val (pageW, pageH) = when (pageSize.uppercase()) {
+                    "A3" -> Pair(842, 1191)
+                    "A5" -> Pair(420, 595)
+                    "LETTER" -> Pair(612, 792)
+                    "LEGAL" -> Pair(612, 1008)
+                    "ID" -> Pair(243, 153)
+                    else -> Pair(595, 842) // A4 default
+                }
+
+                var addedPages = 0
+
                 for (i in 0 until imageUris.size()) {
-                    val uriStr = imageUris.getString(i) ?: continue
-                    val bmp = loadOrientedBitmap(uriStr) ?: continue
+                    val (uriStr, extraRotation) = try {
+                        if (imageUris.getType(i) == com.facebook.react.bridge.ReadableType.Map) {
+                            val map = imageUris.getMap(i)
+                            Pair(map?.getString("uri") ?: "", map?.getInt("rotationDeg") ?: 0)
+                        } else {
+                            Pair(imageUris.getString(i) ?: "", 0)
+                        }
+                    } catch (e: Exception) {
+                        Pair(imageUris.getString(i) ?: "", 0)
+                    }
 
-                    // Standard A4: 595 x 842 pt
-                    val pageW = if (pageSize == "Letter") 612 else 595
-                    val pageH = if (pageSize == "Letter") 792 else 842
+                    if (uriStr.isEmpty()) continue
 
-                    val pageInfo = PdfDocument.PageInfo.Builder(pageW, pageH, i + 1).create()
+                    var bmp = loadOrientedBitmap(uriStr) ?: continue
+
+                    if (extraRotation != 0) {
+                        val matrix = Matrix().apply { postRotate(extraRotation.toFloat()) }
+                        val rotatedBmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
+                        if (rotatedBmp != bmp) {
+                            bmp.recycle()
+                            bmp = rotatedBmp
+                        }
+                    }
+
+                    addedPages++
+                    val pageInfo = PdfDocument.PageInfo.Builder(pageW, pageH, addedPages).create()
                     val page = doc.startPage(pageInfo)
 
                     val scale = min(pageW.toFloat() / bmp.width, pageH.toFloat() / bmp.height)
@@ -1150,6 +1185,12 @@ class InAppCameraModule(reactContext: ReactApplicationContext) :
                     bmp.recycle()
                 }
 
+                if (addedPages == 0) {
+                    doc.close()
+                    promise.reject("EMPTY_DOCUMENT", "No valid images could be decoded to generate PDF")
+                    return@Thread
+                }
+
                 FileOutputStream(outFile).use { fos ->
                     doc.writeTo(fos)
                 }
@@ -1159,7 +1200,7 @@ class InAppCameraModule(reactContext: ReactApplicationContext) :
                     putString("uri", Uri.fromFile(outFile).toString())
                     putString("fileName", cleanName)
                     putDouble("fileSizeBytes", outFile.length().toDouble())
-                    putInt("pageCount", imageUris.size())
+                    putInt("pageCount", addedPages)
                 }
                 promise.resolve(map)
             } catch (e: Exception) {

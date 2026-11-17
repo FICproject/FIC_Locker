@@ -425,22 +425,27 @@ export const ScannerEditScreen: React.FC<{ navigation: any; route: any }> = ({
             {
               text: 'Share via WhatsApp / Email',
               onPress: async () => {
-                await shareService.shareDocument({
-                  _id: `doc_temp_${Date.now()}`,
-                  userId: 'usr_default',
-                  name: `${options.title || 'Scanned_Document'}.pdf`,
-                  originalFileName: `${options.title || 'Scanned_Document'}.pdf`,
-                  fileType: 'pdf',
-                  mimeType: 'application/pdf',
-                  fileSizeBytes: result.fileSizeBytes,
-                  storageKey: 'temp.pdf',
-                  category: 'Personal Documents',
-                  tags: ['scanned', 'pdf'],
-                  status: 'available',
-                  localUri: finalPages[0]?.uri,
-                  createdAt: new Date().toISOString(),
-                  updatedAt: new Date().toISOString(),
-                });
+                const pdfName = `${options.title || 'Scanned_Document'}.pdf`;
+                if (result.fileUri) {
+                  await shareService.shareDocumentFile(result.fileUri, 'application/pdf', pdfName);
+                } else {
+                  await shareService.shareDocument({
+                    _id: `doc_temp_${Date.now()}`,
+                    userId: 'usr_default',
+                    name: pdfName,
+                    originalFileName: pdfName,
+                    fileType: 'pdf',
+                    mimeType: 'application/pdf',
+                    fileSizeBytes: result.fileSizeBytes,
+                    storageKey: 'temp.pdf',
+                    category: 'Personal Documents',
+                    tags: ['scanned', 'pdf'],
+                    status: 'available',
+                    localUri: finalPages[0]?.uri,
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                  });
+                }
               },
             },
           ]

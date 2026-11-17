@@ -181,23 +181,32 @@ export const DocumentDetailScreen: React.FC<{ navigation: any; route: any }> = (
     setShareModalVisible(false);
     setIsSharingPdf(true);
     try {
-      if (doc.fileType === 'pdf' && doc.localUri) {
-        await shareService.shareDocumentFile(doc.localUri, 'application/pdf', doc.name);
-      } else {
+      const cleanTitle = (doc.name || 'Document').replace(/\.[^/.]+$/, '').trim();
+      const pdfFileName = `${cleanTitle}.pdf`;
+
+      // If we have scanned pages/images, ALWAYS generate the native PDF embedding the real scanned photos
+      if (pdfPages.length > 0 && pdfPages.some((p) => Boolean(p.uri))) {
         const result = await pdfService.createPdfFromPages(pdfPages, {
-          title: doc.name.replace(/\.[^/.]+$/, ''),
+          title: cleanTitle,
         });
-        const pdfFileName = `${doc.name.replace(/\.[^/.]+$/, '')}.pdf`;
         if (result.fileUri) {
           await shareService.shareDocumentFile(result.fileUri, 'application/pdf', pdfFileName);
-        } else {
-          await shareService.shareDocument({
-            ...doc,
-            name: pdfFileName,
-            fileType: 'pdf',
-          });
+          return;
         }
       }
+
+      // If document already points to a real local .pdf file
+      if (doc.fileType === 'pdf' && doc.localUri && doc.localUri.toLowerCase().endsWith('.pdf')) {
+        await shareService.shareDocumentFile(doc.localUri, 'application/pdf', doc.name);
+        return;
+      }
+
+      // Fallback
+      await shareService.shareDocument({
+        ...doc,
+        name: pdfFileName,
+        fileType: 'pdf',
+      });
     } catch (err: any) {
       Alert.alert('Share Error', err.message || 'Failed to prepare PDF for sharing.');
     } finally {
