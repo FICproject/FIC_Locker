@@ -49,7 +49,7 @@ export async function authenticateAdmin(req: Request, _res: Response, next: Next
       if (session.revokedAt || session.expiresAt <= new Date()) {
         throw new HttpError(401, 'Admin session is invalid, revoked, or expired.');
       }
-    } else if (env.useLocalEmbeddedDb || env.nodeEnv === 'development') {
+    } else if (env.nodeEnv === 'development') {
       const fallbackAccount = await AdminCredential.findOne({
         $or: [{ _id: payload.sub }, { email: payload.email.toLowerCase() }],
         singletonKey: 'PLATFORM_ADMIN',

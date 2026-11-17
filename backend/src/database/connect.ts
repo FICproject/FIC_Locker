@@ -1,36 +1,25 @@
-import fs from 'fs';
-import path from 'path';
 import mongoose from 'mongoose';
 import { env } from '../config/env';
-
-let embeddedServer: { stop: () => Promise<boolean> } | null = null;
 
 export async function connectDatabase(uri: string = env.mongodbUri): Promise<typeof mongoose> {
   mongoose.set('strictQuery', true);
 
-  if (env.useLocalEmbeddedDb && env.nodeEnv !== 'production') {
-    const { MongoMemoryServer } = await import('mongodb-memory-server');
-    const downloadDir = path.resolve(__dirname, '../../../node_modules/.cache/mongodb-memory-server');
-    embeddedServer = await MongoMemoryServer.create({
-      instance: {
-        dbName: 'doc_scanner_saas',
-      },
-      binary: {
-        downloadDir,
-      },
-    });
-    const localUri = (embeddedServer as unknown as { getUri: () => string }).getUri();
-    console.info(`[Database] Using local embedded MongoDB at ${localUri}`);
-    return mongoose.connect(localUri);
+  if (!uri) {
+    throw new Error('[Database] MONGODB_URI is not defined in backend/.env');
   }
 
-  return mongoose.connect(uri);
+  // Mask credentials for clean logging
+  const maskedUri = uri.replace(/\/\/([^:]+):([^@]+)@/, '//$1:****@');
+  console.info(`[Database] Connecting to MongoDB at ${maskedUri}...`);
+
+  const connection = await mongoose.connect(uri, {
+    serverSelectionTimeoutMS: 10000,
+  });
+
+  console.info('[Database] MongoDB connected successfully.');
+  return connection;
 }
 
 export async function disconnectDatabase(): Promise<void> {
   await mongoose.disconnect();
-  if (embeddedServer) {
-    await embeddedServer.stop();
-    embeddedServer = null;
-  }
 }

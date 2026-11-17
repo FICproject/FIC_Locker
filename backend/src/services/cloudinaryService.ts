@@ -108,3 +108,4 @@ export async function uploadDocumentToCloudinary(params: {
     format: result.format || (isPdf ? 'pdf' : 'jpg'),
   };
 }
+
