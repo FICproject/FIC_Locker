@@ -4,7 +4,7 @@ import { authenticateAdmin } from '../../middleware/authenticateAdmin';
 import { asyncHandler, HttpError, parsePagination, sendSuccess } from '../../utils/apiResponse';
 import { StoredDocument, UploadSession } from '../../models/DocumentModel';
 import { recordAuditLog, resolveSourceApp } from '../../services/auditService';
-import { generatePresignedDocumentUrl } from '../../services/s3Service';
+import { generatePresignedDocumentUrl } from '../../services/cloudinaryService';
 
 const router = Router();
 router.use(authenticateAdmin);

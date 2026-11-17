@@ -29,13 +29,11 @@ export const env = {
     from: process.env.SMTP_FROM || 'FIC Locker Admin <no-reply@ficlocker.local>',
   },
   adminWebUrl: process.env.ADMIN_WEB_URL || 'http://localhost:5173',
-  aws: {
-    region: process.env.AWS_REGION || 'ap-south-1',
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
-    bucketName: process.env.S3_BUCKET_NAME || '',
-    endpoint: process.env.S3_ENDPOINT || '',
-    presignedTtlSeconds: Number(process.env.S3_PRESIGNED_TTL_SECONDS || 120),
+  cloudinary: {
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME || '',
+    apiKey: process.env.CLOUDINARY_API_KEY || '',
+    apiSecret: process.env.CLOUDINARY_API_SECRET || '',
+    folder: process.env.CLOUDINARY_FOLDER || 'fic_locker/documents',
   },
   razorpay: {
     keyId: process.env.RAZORPAY_KEY_ID || '',
