@@ -22,5 +22,8 @@
     "build:web": "npm --workspace=Admin run build",
     "test:backend": "npm --workspace=backend test",
     "seed:admin": "npm --workspace=backend run seed:admin"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
   }
 }

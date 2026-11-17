@@ -7,7 +7,7 @@ import { StoredDocument, UploadSession } from '../../models/DocumentModel';
 import { DocumentCategory } from '../../models/Category';
 import { User } from '../../models/User';
 import { recordAuditLog, resolveSourceApp } from '../../services/auditService';
-import { generatePresignedDocumentUrl } from '../../services/s3Service';
+import { generatePresignedDocumentUrl } from '../../services/cloudinaryService';
 
 const router = Router();
 router.use(authenticateAdmin);
