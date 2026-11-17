@@ -62,6 +62,8 @@ export const shareService = {
           ? fullDoc.pages.filter(Boolean)
           : (fullDoc.localUri && !fullDoc.localUri.toLowerCase().endsWith('.pdf'))
           ? [fullDoc.localUri]
+          : (fullDoc.thumbnailUrl && !fullDoc.thumbnailUrl.toLowerCase().endsWith('.pdf'))
+          ? [fullDoc.thumbnailUrl]
           : [];
 
         if (pageUris.length > 0) {

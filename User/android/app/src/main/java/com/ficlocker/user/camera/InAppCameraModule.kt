@@ -197,17 +197,64 @@ class InAppCameraModule(reactContext: ReactApplicationContext) :
     private fun loadOrientedBitmap(imageUri: String): Bitmap? {
         return try {
             val uri = Uri.parse(imageUri)
-            val stream: InputStream? = when (uri.scheme) {
-                "file" -> File(uri.path ?: "").inputStream()
-                "content" -> reactApplicationContext.contentResolver.openInputStream(uri)
-                "http", "https" -> java.net.URL(imageUri).openStream()
-                else -> {
-                    val f = File(imageUri)
-                    if (f.exists()) f.inputStream() else reactApplicationContext.contentResolver.openInputStream(uri)
+            val stream: InputStream? = try {
+                when (uri.scheme) {
+                    "http", "https" -> java.net.URL(imageUri).openStream()
+                    "content" -> {
+                        try {
+                            reactApplicationContext.contentResolver.openInputStream(uri)
+                        } catch (e: Exception) {
+                            currentActivity?.contentResolver?.openInputStream(uri)
+                        }
+                    }
+                    "file" -> {
+                        val path = uri.path ?: ""
+                        val f = File(path)
+                        if (f.exists()) {
+                            f.inputStream()
+                        } else {
+                            try {
+                                reactApplicationContext.contentResolver.openInputStream(uri)
+                            } catch (e: Exception) {
+                                val decoded = Uri.decode(path)
+                                val fDecoded = File(decoded)
+                                if (fDecoded.exists()) fDecoded.inputStream() else null
+                            }
+                        }
+                    }
+                    else -> {
+                        val f = File(imageUri)
+                        if (f.exists()) f.inputStream() else {
+                            try {
+                                reactApplicationContext.contentResolver.openInputStream(uri)
+                            } catch (e: Exception) { null }
+                        }
+                    }
                 }
+            } catch (e: Exception) {
+                null
             }
-            val bytes = stream?.readBytes() ?: return null
-            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+
+            val bytes = stream?.use { it.readBytes() } ?: return null
+            if (bytes.isEmpty()) return null
+
+            // Safe memory decode with inSampleSize
+            val boundsOptions = BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+            }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, boundsOptions)
+
+            var sampleSize = 1
+            val maxDim = Math.max(boundsOptions.outWidth, boundsOptions.outHeight)
+            while (maxDim / sampleSize > 2500) {
+                sampleSize *= 2
+            }
+
+            val decodeOptions = BitmapFactory.Options().apply {
+                inSampleSize = sampleSize
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions) ?: return null
 
             val orientation = try {
                 if (uri.scheme == "file") {
@@ -234,7 +281,7 @@ class InAppCameraModule(reactContext: ReactApplicationContext) :
             } else {
                 bitmap
             }
-        } catch (e: Exception) {
+        } catch (t: Throwable) {
             null
         }
     }

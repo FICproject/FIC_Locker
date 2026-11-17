@@ -84,30 +84,32 @@ export const pdfService = {
     // Embeds the real scanned high-resolution camera photos directly onto native PDF pages
     if (Platform.OS === 'android' && NativeModules.InAppCameraModule?.convertImagesToPdf) {
       try {
-        const validPages = (pages || []).filter((p) => p && p.uri);
+        const validPages = (pages || []).filter((p) => p && (p.uri || (p as any).originalUri));
         if (validPages.length > 0) {
           const rawTitle = (options?.title || 'FIC_Locker_Doc').replace(/[^a-zA-Z0-9_\-\.]/g, '_');
           const cleanName = rawTitle.endsWith('.pdf') ? rawTitle : `${rawTitle}.pdf`;
           const pageSize = options?.pageSize || 'A4';
 
-          const imageItems = validPages.map((p) => ({
-            uri: p.uri,
-            rotationDeg: p.rotationDeg || 0,
-          }));
+          // Pass pure string URIs for 100% compatibility with all native Android builds
+          const stringUris = validPages
+            .map((p) => (typeof p === 'string' ? p : p.uri || (p as any).originalUri || ''))
+            .filter((u) => Boolean(u) && typeof u === 'string');
 
-          const res = await NativeModules.InAppCameraModule.convertImagesToPdf(
-            imageItems,
-            cleanName,
-            pageSize
-          );
+          if (stringUris.length > 0) {
+            const res = await NativeModules.InAppCameraModule.convertImagesToPdf(
+              stringUris,
+              cleanName,
+              pageSize
+            );
 
-          if (res && res.uri) {
-            return {
-              base64DataUri: '',
-              fileUri: res.uri,
-              fileSizeBytes: Number(res.fileSizeBytes) || 1572864,
-              pageCount: Number(res.pageCount) || validPages.length,
-            };
+            if (res && res.uri) {
+              return {
+                base64DataUri: '',
+                fileUri: res.uri,
+                fileSizeBytes: Number(res.fileSizeBytes) || 1572864,
+                pageCount: Number(res.pageCount) || stringUris.length,
+              };
+            }
           }
         }
       } catch (nativeErr) {
@@ -168,45 +170,10 @@ export const pdfService = {
       // Build content stream instructions
       let streamOps: string[] = [];
 
-      // 1. White page background
+      // Clean white page background
       streamOps.push('q');
       streamOps.push('1 1 1 rg');
       streamOps.push(`0 0 ${pageWidth.toFixed(2)} ${pageHeight.toFixed(2)} re f`);
-      streamOps.push('Q');
-
-      // 2. Decorative Document Card border
-      streamOps.push('q');
-      streamOps.push('0.92 0.94 0.98 rg');
-      streamOps.push(`20 20 ${(pageWidth - 40).toFixed(2)} ${(pageHeight - 40).toFixed(2)} re f`);
-      streamOps.push('0.85 0.88 0.94 RG 1 w');
-      streamOps.push(`20 20 ${(pageWidth - 40).toFixed(2)} ${(pageHeight - 40).toFixed(2)} re S`);
-      streamOps.push('Q');
-
-      // 3. Document Page Header Banner
-      streamOps.push('q');
-      streamOps.push('0.42 0.28 1.0 rg');
-      streamOps.push(`24 ${(pageHeight - 74).toFixed(2)} ${(pageWidth - 48).toFixed(2)} 50 re f`);
-      streamOps.push('Q');
-
-      streamOps.push('BT');
-      streamOps.push('/F2 16 Tf');
-      streamOps.push('1 1 1 rg');
-      streamOps.push(`40 ${(pageHeight - 54).toFixed(2)} Td`);
-      const safeTitle = title.replace(/[()\\]/g, '');
-      streamOps.push(`(${safeTitle}) Tj`);
-      streamOps.push('ET');
-
-      streamOps.push('BT');
-      streamOps.push('/F1 10 Tf');
-      streamOps.push('0.9 0.85 1.0 rg');
-      streamOps.push(`40 ${(pageHeight - 68).toFixed(2)} Td`);
-      streamOps.push(`(Page ${pageIndex + 1} of ${pages.length}  |  Scanned: ${dateStr}  |  FIC Locker Secure Platform) Tj`);
-      streamOps.push('ET');
-
-      // 4. Document Page Content area
-      streamOps.push('q');
-      streamOps.push('0.98 0.98 0.99 rg');
-      streamOps.push(`30 44 ${(pageWidth - 60).toFixed(2)} ${(pageHeight - 124).toFixed(2)} re f`);
       streamOps.push('Q');
 
       // 5. Watermark if requested
