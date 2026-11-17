@@ -94,14 +94,14 @@ export function DocumentDetailScreen({ route }: Props) {
             disabled={busy || doc.files.length === 0}
             onPress={() => handleOpenPresigned('preview')}
           >
-            <Text style={styles.btnText}>Audited Preview</Text>
+            <Text style={styles.btnText}>View</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.btn, styles.darkBtn]}
             disabled={busy || doc.files.length === 0}
             onPress={() => handleOpenPresigned('download')}
           >
-            <Text style={styles.btnText}>Audited Download</Text>
+            <Text style={styles.btnText}>Download</Text>
           </TouchableOpacity>
         </View>
       </View>
