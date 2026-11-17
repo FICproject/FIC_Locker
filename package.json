@@ -9,6 +9,9 @@
     "Admin"
   ],
   "scripts": {
+    "start": "npm --workspace=backend run start",
+    "start:backend": "npm --workspace=backend run start",
+    "build": "npm run build:types && npm run build:backend",
     "dev:backend": "npm --workspace=backend run dev",
     "dev:web": "npm --workspace=Admin run dev",
     "start:mobile": "npm --prefix Admin_Mobile start",
