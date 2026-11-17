@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Image, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { adminMobileApi } from '../../services/adminMobileApi';
@@ -11,6 +12,7 @@ import { ErrorView, LoadingView } from '../../components/MobilePrimitives';
 import { useMobileLiveSync } from '../../hooks/useMobileLiveSync';
 
 export function DashboardScreen() {
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList>>();
   const [data, setData] = useState<DashboardPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -53,7 +55,7 @@ export function DashboardScreen() {
   return (
     <View style={styles.root}>
       {/* Custom Top Header matching DocScan Cloud UI */}
-      <View style={styles.topHeader}>
+      <View style={[styles.topHeader, { paddingTop: Math.max(insets.top, 12) + 6 }]}>
         <TouchableOpacity onPress={() => navigation.navigate('MoreTab')} style={styles.headerBtn}>
           <Text style={styles.menuGlyph}>☰</Text>
         </TouchableOpacity>
