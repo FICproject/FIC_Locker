@@ -1,0 +1,10 @@
+{
+  "buildCommand": "npm run build:types && npm run build:web",
+  "outputDirectory": "Admin/dist",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
