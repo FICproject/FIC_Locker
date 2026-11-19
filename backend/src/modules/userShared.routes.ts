@@ -1,4 +1,6 @@
 import { Router, Request, Response } from 'express';
+import jwt from 'jsonwebtoken';
+import { env } from '../config/env';
 import { asyncHandler } from '../utils/apiResponse';
 import { DocumentCategory } from '../models/Category';
 import { StoredDocument } from '../models/DocumentModel';
@@ -82,9 +84,30 @@ userSharedRouter.get(
 // 3. Storage Info
 userSharedRouter.get(
   '/storage/info',
-  asyncHandler(async (_req: Request, res: Response) => {
-    const user = await User.findOne({ status: { $ne: 'deleted' } });
-    const docs = await StoredDocument.find({ status: { $ne: 'deleted' } }).lean();
+  asyncHandler(async (req: Request, res: Response) => {
+    let currentUser: any = null;
+    const authHeader = req.headers?.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const token = authHeader.slice(7).trim();
+        const secret = env.jwtAdminAccessSecret || 'user_jwt_secret_doc_scanner_saas';
+        const decoded = jwt.verify(token, secret) as any;
+        if (decoded?.sub) {
+          currentUser = await User.findById(decoded.sub);
+        }
+      } catch {}
+    }
+
+    if (!currentUser) {
+      currentUser = await User.findOne({ status: { $ne: 'deleted' } });
+    }
+
+    const filter: Record<string, unknown> = { status: { $ne: 'deleted' } };
+    if (currentUser) {
+      filter.ownerId = currentUser._id;
+    }
+
+    const docs = await StoredDocument.find(filter).lean();
 
     const totalBytes = docs.reduce((sum, d) => sum + (d.totalSizeBytes || 0), 0);
     const quotaBytes = 500 * 1024 * 1024; // 500 MB Free Plan

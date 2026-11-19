@@ -59,17 +59,12 @@ export const SearchScreen: React.FC<{ navigation: any; route: any }> = ({
     setAllDocs(combined);
     setLoading(false);
 
-    if (query.trim()) {
+    if (query.trim() || activeScope !== 'all') {
       executeSearch(query, activeScope, combined);
     }
   };
 
   const executeSearch = (text: string, scope: SearchFilterScope, docsPool: DocumentItem[]) => {
-    if (!text.trim()) {
-      setResults([]);
-      return;
-    }
-
     const q = text.trim().toLowerCase();
     const matchedItems: SearchResultItem[] = [];
 
@@ -78,10 +73,10 @@ export const SearchScreen: React.FC<{ navigation: any; route: any }> = ({
       let reason: 'name' | 'ocr' | 'tags' | 'category' = 'name';
       let snippet = '';
 
-      const nameMatch = doc.name.toLowerCase().includes(q);
-      const tagMatch = (doc.tags || []).some((t) => t.toLowerCase().includes(q));
-      const catMatch = (doc.category || '').toLowerCase().includes(q);
-      const ocrMatch = (doc.ocrText || '').toLowerCase().includes(q);
+      const nameMatch = !q || doc.name.toLowerCase().includes(q);
+      const tagMatch = !q || (doc.tags || []).some((t) => t.toLowerCase().includes(q));
+      const catMatch = !q || (doc.category || '').toLowerCase().includes(q);
+      const ocrMatch = !q ? false : (doc.ocrText || '').toLowerCase().includes(q);
 
       if (ocrMatch) {
         // Find snippet around matched word
@@ -92,8 +87,25 @@ export const SearchScreen: React.FC<{ navigation: any; route: any }> = ({
         snippet = `"...${fullOcr.substring(start, end).replace(/\n/g, ' ')}..."`;
       }
 
+      const isPdfDoc =
+        doc.fileType === 'pdf' ||
+        doc.mimeType?.includes('pdf') ||
+        doc.name.toLowerCase().endsWith('.pdf');
+
+      const isImageDoc =
+        doc.fileType === 'jpg' ||
+        doc.fileType === 'png' ||
+        doc.fileType === 'jpeg' ||
+        doc.mimeType?.includes('image') ||
+        doc.name.toLowerCase().endsWith('.jpg') ||
+        doc.name.toLowerCase().endsWith('.jpeg') ||
+        doc.name.toLowerCase().endsWith('.png');
+
       if (scope === 'all') {
-        if (nameMatch) {
+        if (!q) {
+          isMatch = true;
+          reason = 'name';
+        } else if (nameMatch) {
           isMatch = true;
           reason = 'name';
         } else if (ocrMatch) {
@@ -107,22 +119,26 @@ export const SearchScreen: React.FC<{ navigation: any; route: any }> = ({
           reason = 'category';
         }
       } else if (scope === 'name') {
-        if (nameMatch) {
+        if (!q || nameMatch) {
           isMatch = true;
           reason = 'name';
         }
       } else if (scope === 'ocr') {
-        if (ocrMatch) {
+        if (!q) {
+          isMatch = Boolean(doc.ocrText?.trim());
+          reason = 'ocr';
+          snippet = doc.ocrText ? `"${doc.ocrText.slice(0, 50).replace(/\n/g, ' ')}..."` : '';
+        } else if (ocrMatch) {
           isMatch = true;
           reason = 'ocr';
         }
       } else if (scope === 'pdf') {
-        if ((doc.fileType === 'pdf' || doc.name.toLowerCase().endsWith('.pdf')) && (nameMatch || ocrMatch || tagMatch)) {
+        if (isPdfDoc && (!q || nameMatch || ocrMatch || tagMatch || catMatch)) {
           isMatch = true;
           reason = ocrMatch ? 'ocr' : 'name';
         }
       } else if (scope === 'images') {
-        if (doc.fileType !== 'pdf' && (nameMatch || ocrMatch || tagMatch)) {
+        if ((isImageDoc || !isPdfDoc) && (!q || nameMatch || ocrMatch || tagMatch || catMatch)) {
           isMatch = true;
           reason = ocrMatch ? 'ocr' : 'name';
         }
@@ -269,12 +285,14 @@ export const SearchScreen: React.FC<{ navigation: any; route: any }> = ({
             );
           }}
           ListEmptyComponent={
-            query.trim() ? (
+            query.trim() || activeScope !== 'all' ? (
               <View style={styles.emptyContainer}>
                 <Text style={styles.emptyIcon}>🔍</Text>
                 <Text style={styles.emptyTitle}>No matching documents</Text>
                 <Text style={styles.emptySub}>
-                  No titles, categories, or extracted OCR text matched "{query}".
+                  {query.trim()
+                    ? `No titles, categories, or extracted OCR text matched "${query}".`
+                    : `No documents found under the "${activeScope.toUpperCase()}" filter.`}
                 </Text>
               </View>
             ) : (

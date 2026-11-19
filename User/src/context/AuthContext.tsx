@@ -53,18 +53,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const login = async (email: string, pass: string) => {
+    // Clear previous user's offline document cache on new login
+    await AsyncStorage.removeItem('@fic_locker_offline_docs');
     const res = await authService.login({ email, password: pass });
     setUser(res.user);
     await AsyncStorage.setItem('@fic_locker_user_profile', JSON.stringify(res.user));
   };
 
   const register = async (name: string, email: string, pass: string, phone?: string) => {
+    // Clear previous user's offline document cache on new registration
+    await AsyncStorage.removeItem('@fic_locker_offline_docs');
     const res = await authService.register({ name, email, password: pass, phone });
     setUser(res.user);
     await AsyncStorage.setItem('@fic_locker_user_profile', JSON.stringify(res.user));
   };
 
   const logout = async () => {
+    await AsyncStorage.removeItem('@fic_locker_offline_docs');
     await authService.logout();
     setUser(null);
   };

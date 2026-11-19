@@ -433,6 +433,7 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
       const result = await launchImageLibrary({
         mediaType: 'photo',
         quality: 0.9,
+        selectionLimit: 0, // Allow selecting multiple images (or 0 for max supported)
       });
 
       if (result.didCancel) {
@@ -446,9 +447,37 @@ export const ScannerScreen: React.FC<ScannerScreenProps> = ({ navigation }) => {
         return;
       }
 
-      const firstAsset = result.assets?.[0];
-      if (firstAsset?.uri) {
-        await processCapturedUri(firstAsset.uri, null, false /* manual adjustment */);
+      if (result.assets && result.assets.length > 0) {
+        const validAssets = result.assets.filter((a) => a.uri);
+        if (validAssets.length === 1 && validAssets[0]?.uri) {
+          await processCapturedUri(validAssets[0].uri, null, false);
+        } else if (validAssets.length > 1) {
+          // Multi-page batch import
+          const newBatchItems: ScannedPageItem[] = [];
+          for (let i = 0; i < validAssets.length; i++) {
+            const asset = validAssets[i];
+            if (asset?.uri) {
+              newBatchItems.push({
+                id: `gallery_${Date.now()}_${i + 1}`,
+                uri: asset.uri,
+                originalUri: asset.uri,
+                rotationDeg: 0,
+                paperSize: 'A4',
+                paperDimensions: '210 × 297 mm',
+                confidence: 1,
+              });
+            }
+          }
+          const updatedBatch = [...batchPages, ...newBatchItems];
+          setBatchPages(updatedBatch);
+          navigation.navigate('ScannerEdit', {
+            pageUri: updatedBatch[0].uri,
+            pageIndex: 1,
+            paperSize: updatedBatch[0].paperSize || 'A4',
+            paperDimensions: updatedBatch[0].paperDimensions || '210 × 297 mm',
+            allPages: updatedBatch,
+          });
+        }
       }
     } catch (error: any) {
       Alert.alert('Error', error.message || 'An error occurred while opening gallery.');

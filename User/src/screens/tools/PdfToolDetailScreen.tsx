@@ -1315,7 +1315,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#7C3AED',
   },
   doneBtn: {
-    backgroundColor: '#374151',
+    backgroundColor: '#0F172A',
+    borderWidth: 1.5,
+    borderColor: '#38BDF8',
   },
   actionBtnEmoji: {
     fontSize: 16,

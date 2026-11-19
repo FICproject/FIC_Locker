@@ -93,14 +93,29 @@ export const UploadDocumentScreen: React.FC<{ navigation: any; route: any }> = (
     navigation.navigate('Scanner');
   };
 
+  const [allPages, setAllPages] = useState<any[]>(allPagesFromRoute);
+
   const handleSelectGallery = async () => {
     setPickerModalVisible(false);
     try {
-      const res = await launchImageLibrary({ mediaType: 'photo', quality: 0.9 });
-      if (res.assets && res.assets[0]?.uri) {
-        setSelectedImageUri(res.assets[0].uri);
-        if (res.assets[0].fileName) {
-          setDocName(res.assets[0].fileName);
+      const res = await launchImageLibrary({
+        mediaType: 'photo',
+        quality: 0.9,
+        selectionLimit: 0,
+      });
+      if (res.assets && res.assets.length > 0) {
+        const validAssets = res.assets.filter((a) => a.uri);
+        if (validAssets.length > 0) {
+          setSelectedImageUri(validAssets[0].uri!);
+          if (validAssets[0].fileName) {
+            setDocName(validAssets.length > 1 ? `Scanned_Doc_${Date.now()}.pdf` : validAssets[0].fileName);
+          }
+          const pagesList = validAssets.map((a, i) => ({
+            id: `p_${i + 1}`,
+            uri: a.uri,
+            rotationDeg: 0,
+          }));
+          setAllPages(pagesList);
         }
       }
     } catch (err: any) {
@@ -161,6 +176,8 @@ export const UploadDocumentScreen: React.FC<{ navigation: any; route: any }> = (
         // Backend created document in upload-auth
       }
 
+      const effectivePages = allPages.length > 0 ? allPages : allPagesFromRoute;
+
       // Step 3: Cache in local storage for offline / instant view
       const newDocItem: DocumentItem = {
         ...(confirmedDoc || {}),
@@ -176,8 +193,8 @@ export const UploadDocumentScreen: React.FC<{ navigation: any; route: any }> = (
         tags: parsedTags,
         notes: description.trim(),
         ocrText: ocrTextFromRoute || undefined,
-        pageCount: allPagesFromRoute.length || 1,
-        pages: allPagesFromRoute.length ? allPagesFromRoute.map((p: any) => p.uri) : undefined,
+        pageCount: effectivePages.length || 1,
+        pages: effectivePages.length ? effectivePages.map((p: any) => p.uri) : undefined,
         status: 'available',
         localUri: selectedImageUri || undefined,
         thumbnailUrl: selectedImageUri || undefined,
@@ -227,6 +244,8 @@ export const UploadDocumentScreen: React.FC<{ navigation: any; route: any }> = (
       ]);
     } catch (err: any) {
       console.warn('[UploadDocumentScreen] Upload error:', err);
+      const effectivePages = allPages.length > 0 ? allPages : allPagesFromRoute;
+
       // Fallback: save to local offline documents so scan is never lost
       const localDocItem: DocumentItem = {
         _id: `doc_local_${Date.now()}`,
@@ -241,8 +260,8 @@ export const UploadDocumentScreen: React.FC<{ navigation: any; route: any }> = (
         tags: parsedTags,
         notes: description.trim(),
         ocrText: ocrTextFromRoute || undefined,
-        pageCount: allPagesFromRoute.length || 1,
-        pages: allPagesFromRoute.length ? allPagesFromRoute.map((p: any) => p.uri) : undefined,
+        pageCount: effectivePages.length || 1,
+        pages: effectivePages.length ? effectivePages.map((p: any) => p.uri) : undefined,
         status: 'available',
         localUri: selectedImageUri || undefined,
         thumbnailUrl: selectedImageUri || undefined,
@@ -350,19 +369,6 @@ export const UploadDocumentScreen: React.FC<{ navigation: any; route: any }> = (
         </View>
 
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Description / Notes (Optional)</Text>
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            placeholder="Add description..."
-            placeholderTextColor={colors.textMuted}
-            multiline
-            numberOfLines={3}
-            value={description}
-            onChangeText={setDescription}
-          />
-        </View>
-
-        <View style={styles.inputGroup}>
           <Text style={styles.label}>Category</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
             {categoriesList.map((cat) => {
@@ -380,17 +386,6 @@ export const UploadDocumentScreen: React.FC<{ navigation: any; route: any }> = (
               );
             })}
           </ScrollView>
-        </View>
-
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Tags (Comma separated)</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g. tax, 2026, invoice"
-            placeholderTextColor={colors.textMuted}
-            value={tags}
-            onChangeText={setTags}
-          />
         </View>
 
         <View style={styles.inputGroup}>

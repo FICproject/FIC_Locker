@@ -7,6 +7,8 @@ import { DocumentCategory } from '../../models/Category';
 import { User } from '../../models/User';
 import { DEFAULT_USER_ID } from '../../scripts/bootstrap';
 
+import { generatePresignedDocumentUrl } from '../../services/cloudinaryService';
+
 export const userDocumentsRouter = Router();
 
 import jwt from 'jsonwebtoken';
@@ -99,7 +101,7 @@ userDocumentsRouter.post(
   '/upload-auth',
   asyncHandler(async (req: Request, res: Response) => {
     const body = uploadAuthSchema.parse(req.body);
-    const user = await resolveCurrentUser();
+    const user = await resolveCurrentUser(req);
 
     // Resolve or find Category
     let category = await DocumentCategory.findOne({
@@ -214,9 +216,11 @@ userDocumentsRouter.post(
 userDocumentsRouter.get(
   '/',
   asyncHandler(async (req: Request, res: Response) => {
+    const user = await resolveCurrentUser(req);
     const { search, fileType, category, isFavourite, isArchived, folderId } = req.query;
 
     const filter: Record<string, unknown> = {
+      ownerId: user._id,
       status: { $ne: 'deleted' },
     };
 
@@ -296,9 +300,30 @@ userDocumentsRouter.get(
     if (!doc || doc.status === 'deleted') {
       throw new HttpError(404, 'Document not found.');
     }
+
+    const formatted = formatDocument(doc);
+
+    // If storageKey exists, generate viewing/download URLs from Cloudinary
+    const fileEntry = doc.files?.[0];
+    if (fileEntry?.storageKey) {
+      try {
+        const previewSigned = await generatePresignedDocumentUrl({
+          storageKey: fileEntry.storageKey,
+          mode: 'preview',
+          filename: fileEntry.originalFilename || doc.name,
+          mimeType: fileEntry.mimeType,
+        });
+        (formatted as any).thumbnailUrl = previewSigned.url;
+        (formatted as any).localUri = previewSigned.url;
+        (formatted as any).downloadUrl = previewSigned.url;
+      } catch (err) {
+        console.warn('Could not generate presigned preview url:', err);
+      }
+    }
+
     return res.json({
       success: true,
-      document: formatDocument(doc),
+      document: formatted,
     });
   })
 );

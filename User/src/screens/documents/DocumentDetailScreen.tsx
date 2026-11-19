@@ -63,9 +63,29 @@ export const DocumentDetailScreen: React.FC<{ navigation: any; route: any }> = (
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [moveModalVisible, setMoveModalVisible] = useState(false);
 
-  // Sync document pages and details from local offline cache
+  // Sync document pages and details from local offline cache and remote backend
   useEffect(() => {
     (async () => {
+      // 1. Fetch latest details from backend if document has ID
+      if (doc._id && !doc._id.startsWith('doc_local_')) {
+        try {
+          const remoteDoc = await documentService.getDocumentById(doc._id);
+          if (remoteDoc) {
+            setDoc((prev) => ({
+              ...prev,
+              ...remoteDoc,
+              localUri: remoteDoc.localUri || remoteDoc.thumbnailUrl || remoteDoc.downloadUrl || prev.localUri,
+              thumbnailUrl: remoteDoc.thumbnailUrl || remoteDoc.localUri || remoteDoc.downloadUrl || prev.thumbnailUrl,
+              pages: (remoteDoc.pages && remoteDoc.pages.length > 0) ? remoteDoc.pages : prev.pages,
+              pageCount: remoteDoc.pageCount || prev.pageCount,
+            }));
+          }
+        } catch (fetchErr) {
+          console.warn('Failed to fetch remote document details:', fetchErr);
+        }
+      }
+
+      // 2. Fetch cached offline details
       try {
         const cached = await AsyncStorage.getItem('@fic_locker_offline_docs');
         if (cached) {

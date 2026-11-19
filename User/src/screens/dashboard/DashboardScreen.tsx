@@ -39,6 +39,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
   });
 
   const [recentDocs, setRecentDocs] = useState<DocumentItem[]>([]);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState<number>(0);
   const [refreshing, setRefreshing] = useState(false);
 
   const loadDashboardData = async () => {
@@ -49,7 +50,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
     try {
       const cached = await AsyncStorage.getItem('@fic_locker_offline_docs');
       if (cached) {
-        localDocs = deduplicateDocuments(JSON.parse(cached));
+        const parsed = deduplicateDocuments(JSON.parse(cached)) as DocumentItem[];
+        // Only include local documents that belong to this user (or unassigned offline)
+        localDocs = parsed.filter((d) => !d.userId || !user?._id || d.userId === user._id);
       }
     } catch {}
 
@@ -71,6 +74,20 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
 
     // Display maximum of 10 recent documents
     setRecentDocs(allDocs.slice(0, 10));
+
+    // Update unread notifications count
+    try {
+      const notifsRaw = await AsyncStorage.getItem('@fic_locker_notifications');
+      if (notifsRaw) {
+        const notifs = JSON.parse(notifsRaw);
+        const unread = Array.isArray(notifs) ? notifs.filter((n: any) => n.unread).length : 0;
+        setUnreadNotificationsCount(unread);
+      } else {
+        setUnreadNotificationsCount(0);
+      }
+    } catch {
+      setUnreadNotificationsCount(0);
+    }
 
     // Update storage stats
     try {
@@ -154,7 +171,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) 
               accessibilityLabel="Notifications"
             >
               <BellIcon size={22} color={colors.text} />
-              <View style={styles.badgeDot} />
+              {unreadNotificationsCount > 0 && <View style={styles.badgeDot} />}
             </TouchableOpacity>
           </View>
         </View>

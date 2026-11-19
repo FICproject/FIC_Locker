@@ -12,7 +12,10 @@ const registerSchema = z.object({
   name: z.string().min(2).max(100),
   email: z.string().email(),
   password: z.string().min(4).max(100),
-  phone: z.string().optional(),
+  phone: z
+    .string()
+    .regex(/^[6-9]\d{9}$/, 'Please provide a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.')
+    .optional(),
 });
 
 const loginSchema = z.object({
